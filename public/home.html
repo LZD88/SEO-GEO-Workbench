@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>曜见 YaoSight · 搜索与 AI 可见性</title>
+  <link rel="stylesheet" href="/home.css">
+  <script type="module" src="/home.js"></script>
+</head>
+<body>
+  <header class="site-nav shell">
+    <a class="wordmark" href="/home" aria-label="曜见首页">
+      <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M10 12l9.5 9 8-8m-8 8v9"/><path class="spark" d="M30 6l1.4 3.8 3.8 1.4-3.8 1.4-1.4 3.8-1.4-3.8-3.8-1.4 3.8-1.4z"/></svg>
+      <strong>曜见 <span>YaoSight</span></strong>
+    </a>
+    <nav class="site-links" aria-label="首页导航"><a href="/home#capabilities">核心能力</a><a href="/home#workflow">使用流程</a><a href="/home#faq">常见问题</a></nav>
+    <div class="nav-actions"><button class="theme-toggle" data-theme-toggle type="button" aria-label="切换主题">◐</button><a class="pill primary" href="/login" data-session-link>登录</a></div>
+  </header>
+  <main id="home" class="shell">
+    <section class="hero">
+      <p class="eyebrow"><span></span> SEO + GEO 工作台</p>
+      <h1>让搜索找到你，<br><span>让 AI 看见你。</span></h1>
+      <p class="lead">从搜索引擎的收录线索，到 AI 回答里的品牌提及与文章引用。用同一个工作台发现问题、核对来源、跟踪变化。</p>
+      <div class="hero-actions"><a class="pill primary" href="/login" data-session-link>进入工作台 <b aria-hidden="true">↗</b></a><a class="pill secondary" href="#capabilities">了解能力 <b aria-hidden="true">↓</b></a></div>
+      <div class="ticker" aria-label="所支持的检测平台">
+        <div class="ticker-track">
+          <span>豆包 <i>✦</i> 千问 <i>✦</i> GPT <i>✦</i> Gemini <i>✦</i> DeepSeek <i>✦</i> 百度 AI（文心） <i>✦</i></span>
+          <span aria-hidden="true">豆包 <i>✦</i> 千问 <i>✦</i> GPT <i>✦</i> Gemini <i>✦</i> DeepSeek <i>✦</i> 百度 AI（文心） <i>✦</i></span>
+        </div>
+      </div>
+    </section>
+    <figure class="signal" aria-label="曜见动态信号图">
+      <canvas id="signal" aria-hidden="true"></canvas>
+      <div class="signal-caption"><span><i></i> 搜索与生成式回答</span><span>YaoSight / 01</span></div>
+      <div class="signal-key"><span>搜索收录</span><span>品牌提及</span><span>来源引用</span></div>
+      <button class="signal-toggle" id="motion-toggle" type="button" aria-pressed="false">暂停动效</button>
+    </figure>
+    <section class="section" id="capabilities">
+      <div class="section-heading"><h2>从页面问题，<br>看到回答里的证据。</h2><p>用 SEO 审计查网站本身，再用 GEO 检测核对文章与品牌在不同答案中的表现。</p></div>
+      <div class="capabilities">
+        <article class="feature seo"><span class="feature-icon" aria-hidden="true">↗</span><h3>技术 SEO 审计</h3><p>检查标题、描述、重定向和失效链接，下载可追溯的页面报告。</p></article>
+        <article class="feature articles"><span class="feature-icon" aria-hidden="true">↳</span><h3>文章引用检测</h3><p>比对平台返回的引用和原文链接，分清正式引用与正文提及。</p></article>
+        <article class="feature brands"><span class="feature-icon" aria-hidden="true">◎</span><h3>品牌可见性</h3><p>用客户真实会问的问题，比较六个平台的回答与品牌提及。</p></article>
+      </div>
+    </section>
+    <section class="section process" id="workflow">
+      <div class="section-heading"><h2>三步看清检测结果</h2></div>
+      <ol><li><span>01</span><strong>填入链接</strong><p>输入网站、文章或品牌信息。</p></li><li><span>02</span><strong>发起检测</strong><p>选择平台，或运行站内抓取。</p></li><li><span>03</span><strong>核对证据</strong><p>查看原始回答、引用或审计报告。</p></li></ol>
+    </section>
+    <section class="section faq" id="faq">
+      <div class="section-heading"><h2>常见问题</h2></div>
+      <details><summary>SEO 和 GEO 分别检测什么？</summary><p>SEO 审计检查页面和站点的技术问题。GEO 检测采样模型回答，统计它们有没有提及品牌，或引用目标文章。</p></details>
+      <details><summary>为什么有些平台显示暂不可用？</summary><p>只有后台配置完成的平台才能发起检测。平台的联网和引用能力由接入的模型服务决定。</p></details>
+      <details><summary>怎样比较两次检测？</summary><p>使用相同问题、模型和联网设置，再在历史记录中对照。每次回答可能变化，重复采样更有参考价值。</p></details>
+    </section>
+    <section class="closing"><h2>看看你的内容被怎样看见。</h2><a class="pill primary" href="/login" data-session-link>进入工作台 ↗</a></section>
+  </main>
+  <main class="shell login" id="login" hidden>
+    <aside class="login-visual"><span class="eyebrow"><span></span> 曜见 YaoSight</span><h2>看见你的<br>可见性。</h2><div class="login-orbits" aria-hidden="true"><i></i><i></i><i></i></div></aside>
+    <section class="login-panel">
+      <a class="back" href="/home">← 返回首页</a>
+      <h1 id="login-title">登录曜见</h1>
+      <p class="login-description" id="login-description">正在读取本机账号状态…</p>
+      <form id="login-form">
+        <label for="password">工作台密码</label><input id="password" name="password" type="password" minlength="8" maxlength="128" autocomplete="current-password" required>
+        <div class="confirm-field" id="confirm-field" hidden><label for="confirm">确认密码</label><input id="confirm" name="confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password"></div>
+        <button class="pill primary" type="submit" id="login-button" disabled>登录</button>
+        <p id="login-error" role="status"></p>
+      </form>
+    </section>
+  </main>
+  <footer class="site-footer shell"><span>曜见 YaoSight</span><a href="/home">返回首页 ↑</a></footer>
+</body>
+</html>
