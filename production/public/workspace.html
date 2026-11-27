@@ -44,7 +44,8 @@
           <form id="article-optimization">
             <label>文章标题 <input name="title" required maxlength="180"></label>
             <label>正文 <textarea name="text" maxlength="12000" rows="5"></textarea></label>
-            <label>结合检测结果 <select name="checkId"><option value="">仅分析文章</option></select></label>
+            <label>从 GEO 检测记录选择 <select name="checkId"><option value="">直接填写或导入新文章</option></select></label>
+            <p id="article-evidence-status" role="status"></p>
             <label>识图模型 <select name="platform" required></select></label>
             <button>生成优化报告</button>
           </form>

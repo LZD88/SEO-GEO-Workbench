@@ -1,3 +1,5 @@
+import { articleAdvice } from "./article-evidence.js";
+
 const byId = (id) => document.getElementById(id);
 const reportDate = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai", dateStyle: "medium", timeStyle: "short",
@@ -155,11 +157,17 @@ export function setupArticleAgent(api) {
   const readButton = byId("optimize-read");
   const readStatus = byId("optimize-read-status");
   const context = byId("optimize-context");
+  const checkPicker = byId("optimize-check");
+  const checkStatus = byId("optimize-check-status");
   const download = byId("article-report-download");
   const history = byId("article-report-history");
   const reportStatus = byId("article-report-status");
   const reportSource = byId("article-report-source");
   let attachedCheck;
+  let canUseEvidence = false;
+  let checkLoad = 0;
+  let articleLoad = 0;
+  let lookupTimer;
   let choices;
   let requested = false;
   let reading = false;
@@ -168,7 +176,14 @@ export function setupArticleAgent(api) {
 
   function sync() {
     const busy = requested || reading;
-    submit.disabled = busy || !platform.value;
+    const text = form.elements.text.value.trim();
+    form.elements.text.required = !canUseEvidence;
+    byId("optimize-text-hint").textContent = canUseEvidence
+      ? "留空时只根据 GEO 结果生成建议。填写正文后，报告可以细化到段落。"
+      : "填写 30–12,000 字符，建议保留原有的小标题和段落。";
+    submit.disabled = busy || !platform.value || (text ? text.length < 30 : !canUseEvidence);
+    submit.firstChild.textContent = canUseEvidence && !text ? "按 GEO 结果生成建议 " : "生成优化报告 ";
+    checkPicker.disabled = busy;
     readButton.disabled = busy;
     source.readOnly = reading;
     form.elements.title.readOnly = reading;
@@ -177,26 +192,118 @@ export function setupArticleAgent(api) {
     images.lock(busy);
   }
 
+  async function listChecks() {
+    const request = ++checkLoad;
+    try {
+      const checks = await api("/api/geo-checks?kind=article");
+      if (request !== checkLoad) return;
+      checkPicker.replaceChildren(new Option("直接填写或导入新文章", ""));
+      for (const check of checks) checkPicker.add(new Option(check.name + " · " + reportDate.format(new Date(check.createdAt)), check.id));
+      selectAttached();
+    } catch {
+      if (request === checkLoad && !attachedCheck) checkStatus.textContent = "暂时无法读取 GEO 记录，仍可以直接导入文章。";
+    }
+  }
+
+  function selectAttached() {
+    if (attachedCheck && ![...checkPicker.options].some((option) => option.value === attachedCheck.id)) {
+      checkPicker.add(new Option(attachedCheck.name, attachedCheck.id));
+    }
+    checkPicker.value = attachedCheck?.id || "";
+  }
+
+  function applyArticle(article, saved) {
+    images.replace(article.images);
+    form.elements.title.value = article.title;
+    form.elements.text.value = article.text;
+    source.value = saved ? attachedCheck.url : article.url;
+    readStatus.classList.remove("error");
+    const notes = [saved ? "已自动带入这次检测的正文" : "已读取正文"];
+    if (article.images.length) notes.push("和 " + article.images.length + " 张配图");
+    if (article.omittedImages) notes.push("。部分配图未导入，可手动上传");
+    if (article.truncated) notes.push("。正文已截取前 12,000 字符");
+    readStatus.textContent = notes.join("") + "。";
+  }
+
+  async function loadContext(check, request) {
+    try {
+      const result = await api("/api/geo-checks/" + check.id + "/article");
+      if (request !== articleLoad) return;
+      canUseEvidence = result.canUseEvidence;
+      if (result.status === "preparing") {
+        checkStatus.textContent = "正在准备正文和配图，完成后会自动带入。";
+        lookupTimer = setTimeout(() => void loadContext(check, request), 1200);
+      } else if (result.article) {
+        checkStatus.textContent = "已带入 GEO 结果。";
+        if (!form.elements.text.value.trim() && source.value === check.url && !reading && !requested) {
+          applyArticle(result.article, true);
+        }
+      } else {
+        checkStatus.textContent = canUseEvidence
+          ? "已有 GEO 结果，可以直接生成建议。需要逐段改写时，可以补充正文。"
+          : "这条记录没有可用的文章或 AI 回答，可以读取文章或粘贴正文。";
+      }
+    } catch {
+      if (request === articleLoad) checkStatus.textContent = "暂时无法载入这篇文章，请稍后重试。";
+    } finally {
+      if (request === articleLoad) sync();
+    }
+  }
+
   function attach(check) {
-    if (!requested && !reading && attachedCheck?.id !== check.id) {
+    if (requested || reading) return;
+    if (attachedCheck?.id !== check.id) {
+      clearTimeout(lookupTimer);
+      const request = ++articleLoad;
       attachedCheck = check;
+      canUseEvidence = false;
+      images.replace([]);
       source.value = check.url || "";
-      readStatus.textContent = "";
       form.elements.title.value = check.name;
+      form.elements.text.value = "";
       form.elements.question.value = check.question ?? "";
       byId("optimize-context-title").textContent = check.name;
+      byId("optimize-previous-advice").textContent = "GEO 建议 · " + articleAdvice(check.samples)[0][0];
       context.hidden = false;
+      checkStatus.textContent = "正在载入此文章的检测结果…";
+      readStatus.textContent = "";
+      readStatus.classList.remove("error");
+      selectAttached();
+      sync();
+      void loadContext(check, request);
     }
-    location.hash = "optimize";
+    if (location.hash !== "#optimize") location.hash = "optimize";
   }
 
   function detach() {
+    clearTimeout(lookupTimer);
+    articleLoad++;
     attachedCheck = undefined;
+    canUseEvidence = false;
     context.hidden = true;
+    checkStatus.textContent = "";
+    selectAttached();
+    sync();
   }
 
+  checkPicker.addEventListener("change", async () => {
+    const id = checkPicker.value;
+    if (!id) return detach();
+    const request = ++articleLoad;
+    try {
+      const check = await api("/api/geo-checks/" + id);
+      if (request === articleLoad) attach(check);
+    } catch (error) {
+      if (request === articleLoad) {
+        selectAttached();
+        if (attachedCheck) void loadContext(attachedCheck, request);
+        else checkStatus.textContent = error.message;
+      }
+    }
+  });
   byId("optimize-detach").addEventListener("click", detach);
   platform.addEventListener("change", sync);
+  form.elements.text.addEventListener("input", sync);
 
   async function importArticle() {
     if (reading || requested) return;
@@ -212,16 +319,10 @@ export function setupArticleAgent(api) {
     readStatus.classList.remove("error");
     readStatus.textContent = "正在读取文章和配图…";
     try {
-      const article = await api("/api/article-source", { url });
-      images.replace(article.images);
-      form.elements.title.value = article.title;
-      form.elements.text.value = article.text;
-      source.value = article.url;
-      if (attachedCheck && ![url, article.url].includes(attachedCheck.url)) detach();
-      const notes = [article.images.length ? "已读取正文和 " + article.images.length + " 张配图。" : "已读取标题和正文。"];
-      if (article.omittedImages) notes.push(article.images.length ? "部分配图未导入，可手动上传。" : "配图未能导入，可手动上传。");
-      if (article.truncated) notes.push("正文已截取前 12,000 字符，可以调整分析范围。");
-      readStatus.textContent = notes.join("");
+      const checkId = attachedCheck?.url === url ? attachedCheck.id : undefined;
+      const article = await api("/api/article-source", { url, checkId });
+      if (attachedCheck && !checkId) detach();
+      applyArticle(article, Boolean(checkId));
     } catch (error) {
       readStatus.classList.add("error");
       readStatus.textContent = error.message || "暂时无法读取文章，请重试。";
@@ -267,6 +368,7 @@ export function setupArticleAgent(api) {
   }
 
   async function open(id) {
+    if (!id) void listChecks();
     const request = ++reportLoad;
     history.disabled = true;
     reportStatus.classList.remove("error");
@@ -303,7 +405,10 @@ export function setupArticleAgent(api) {
     status.textContent = "正在分析文章并生成报告…";
     const payload = Object.fromEntries(new FormData(form));
     try {
-      const report = await api("/api/article-optimization", { ...payload, checkId: attachedCheck?.id, images: await images.payload() });
+      const evidenceOnly = canUseEvidence && !payload.text.trim();
+      const report = await api("/api/article-optimization", {
+        ...payload, checkId: attachedCheck?.id, evidenceOnly, images: evidenceOnly ? undefined : await images.payload(),
+      });
       if (/^#optimize(?:\/|$)/.test(location.hash)) location.hash = "optimize/" + report.id;
       status.textContent = "报告已生成并归档。";
     } catch (error) {

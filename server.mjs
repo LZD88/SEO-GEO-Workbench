@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { articleBodyLimit, createArticleOptimizer } from "./article-optimization.mjs";
 import { readArticle } from "./article-reader.mjs";
+import { createArticleContext } from "./article-context.mjs";
+import { hasArticleEvidence } from "./public/article-evidence.js";
 import { articleReportMarkdown, articleReportPath, createArticleReports } from "./article-reports.mjs";
 import { createGeoChecks, GeoError } from "./geo-checks.mjs";
 import { createGeoPlatforms } from "./geo-platforms.mjs";
@@ -34,6 +36,7 @@ const geoChecks = createGeoChecks({
   platforms: geoPlatforms,
 });
 const optimizeArticle = createArticleOptimizer(geoChecks, geoPlatforms);
+const articleContext = createArticleContext(join(dataDir, "article-context"));
 const articleReports = createArticleReports(join(dataDir, "article-reports"));
 const files = { html: "report.html", json: "report.json", log: "crawl.log" };
 const staticFiles = new Map([
@@ -46,6 +49,7 @@ const staticFiles = new Map([
   ["/style.css", ["public/style.css", "text/css; charset=utf-8"]],
   ["/app.js", ["public/app.js", "text/javascript; charset=utf-8"]],
   ["/article-agent.js", ["public/article-agent.js", "text/javascript; charset=utf-8"]],
+  ["/article-evidence.js", ["public/article-evidence.js", "text/javascript; charset=utf-8"]],
   ["/admin", ["public/admin.html", "text/html; charset=utf-8"]],
   ["/admin.css", ["public/admin.css", "text/css; charset=utf-8"]],
   ["/admin.js", ["public/admin.js", "text/javascript; charset=utf-8"]],
@@ -234,7 +238,8 @@ function publicSeoJob({ id, url, demo, status, createdAt, files }) {
 async function handle(req, res, binary) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   if (req.headers.host !== host + ":" + port) return json(res, 421, { error: "请使用本机工作台地址。" });
-  const path = new URL(req.url, origin).pathname;
+  const requestUrl = new URL(req.url, origin);
+  const path = requestUrl.pathname;
   if (path.startsWith("/api/admin/")) return admin.handle(req, res, path, input, json, origin);
   if (["/api/session", "/api/setup", "/api/login", "/api/logout"].includes(path)) {
     return auth.handle(req, res, path, input, json, origin);
@@ -256,7 +261,15 @@ async function handle(req, res, binary) {
     try { payload = await input(req, reading ? 8192 : articleBodyLimit); }
     catch { return json(res, 400, { error: "请求格式无效或正文太长。" }); }
     try {
-      return json(res, 200, reading ? await readArticle(payload.url) : publicArticleReport(await articleReports.save(await optimizeArticle(payload))));
+      if (!reading) {
+        const report = await articleReports.save(await optimizeArticle(payload));
+        return json(res, 200, publicArticleReport(report));
+      }
+      const check = payload.checkId ? await geoChecks.result(payload.checkId) : null;
+      if (check && (check.kind !== "article" || payload.url !== check.url)) {
+        return json(res, 400, { error: "文章链接与关联检测不一致。" });
+      }
+      return json(res, 200, check ? await articleContext.load(check) : await readArticle(payload.url));
     } catch (error) {
       if (error instanceof GeoError) return json(res, error.status, { error: error.message });
       throw error;
@@ -282,12 +295,28 @@ async function handle(req, res, binary) {
       throw error;
     }
   }
-  const geoResult = /^\/api\/geo-checks\/([a-f0-9]{64}|[a-f0-9-]{36})$/.exec(path);
+  const geoResult = /^\/api\/geo-checks\/([a-f0-9]{64}|[a-f0-9-]{36})(\/article)?$/.exec(path);
   if (path === "/api/geo-checks" || geoResult) {
     try {
       if (req.method === "GET") {
-        if (geoResult) return json(res, 200, publicGeoResult(await geoChecks.result(geoResult[1])));
-        const history = await geoChecks.list();
+        if (geoResult) {
+          const check = await geoChecks.result(geoResult[1]);
+          if (!geoResult[2]) return json(res, 200, publicGeoResult(check));
+          if (check.kind !== "article") return json(res, 404, { error: "找不到这篇文章的检测记录。" });
+          let source = check;
+          let material = await articleContext.find(source);
+          const seen = new Set([source.id]);
+          while (material.status === "missing" && source.comparisonMode === "retry" &&
+              source.baselineId && !seen.has(source.baselineId)) {
+            try { source = await geoChecks.result(source.baselineId); }
+            catch (error) { if (error.status === 404) break; throw error; }
+            seen.add(source.id);
+            material = await articleContext.find(source);
+          }
+          return json(res, 200, { ...material, canUseEvidence: hasArticleEvidence(check) });
+        }
+        const articleOnly = requestUrl.searchParams.get("kind") === "article";
+        const history = articleOnly ? await geoChecks.list(30, { kind: "article", state: "completed" }) : await geoChecks.list();
         return json(res, 200, history.map(({ id, kind, name, createdAt, state, baselineId }) => ({ id, kind, name, createdAt, state, baselineId })));
       }
       if (req.method === "POST" && !geoResult) {
@@ -303,6 +332,7 @@ async function handle(req, res, binary) {
             kind: payload.kind, name: payload.name, url: payload.url, question: payload.question, platforms: payload.platforms,
             ...admin.geoOptions(payload.platforms),
           });
+        articleContext.prepare(check);
         return json(res, 202, { id: check.id });
       }
       return json(res, 405, { error: "不支持此请求。" });

@@ -6,6 +6,8 @@ let activeProject;
 let activeJob;
 let activeRequest;
 let articleSource;
+let articleSelection = 0;
+let articleTimer;
 let editedMonitor;
 let lastJobs = [];
 let refreshTimer;
@@ -49,6 +51,8 @@ function item(label, buttonLabel, action) {
 async function refresh() {
   byId("project").hidden = true;
   activeProject = activeJob = articleSource = editedMonitor = undefined;
+  articleSelection++;
+  clearTimeout(articleTimer);
   clearTimeout(refreshTimer);
   const space = selected();
   const workspace = base();
@@ -93,6 +97,9 @@ async function openProject(project) {
   byId("job-details").hidden = true;
   byId("new-geo").hidden = workspace.role === "viewer";
   articleSource = editedMonitor = undefined;
+  articleSelection++;
+  clearTimeout(articleTimer);
+  byId("article-evidence-status").textContent = "";
   byId("monitor-form").reset();
   byId("article-source-status").textContent = "";
   byId("article-optimization").reset();
@@ -141,7 +148,7 @@ async function jobList() {
   const previous = association.value;
   association.replaceChildren(new Option("仅分析文章", ""), ...jobs
     .filter(({ kind, status, target_kind }) => kind === "geo" && target_kind === "article" &&
-      ["succeeded", "partial"].includes(status))
+      ["succeeded", "partial", "review"].includes(status))
     .map(({ id, name }) => new Option(name, id)));
   if ([...association.options].some(({ value }) => value === previous)) association.value = previous;
   const titles = { geo: "AI 曝光", seo: "网站检查", "article-source": "读取文章", "article-optimization": "文章优化" };
@@ -203,9 +210,14 @@ async function showJob(id, baseline) {
       }
       row.append(preview);
       if (selected().role !== "viewer") {
+        articleSelection++;
+        clearTimeout(articleTimer);
         articleSource = job.id;
-        byId("article-optimization").elements.title.value = evidence.title;
-        byId("article-optimization").elements.text.value = evidence.text;
+        const optimization = byId("article-optimization").elements;
+        optimization.checkId.value = job.baseline_id || "";
+        optimization.title.value = evidence.title;
+        optimization.text.value = evidence.text;
+        byId("article-evidence-status").textContent = job.baseline_id ? "已关联 GEO 检测结果。" : "";
         byId("article-source-status").textContent = [
           "已导入 " + (evidence.images?.length ?? 0) + " 张图",
           evidence.omittedImages ? "省略 " + evidence.omittedImages + " 张" : "",
@@ -249,6 +261,15 @@ async function showJob(id, baseline) {
     if (stillRunning) {
       action("取消任务", async () => { await api(path + "/jobs/" + id + "/cancel", "POST"); await showJob(id); });
     } else if (job.kind === "geo") {
+      if (job.targetKind === "article" && byId("article-tools").hidden === false) {
+        action("帮我优化这篇文章", async () => {
+          const select = byId("article-optimization").elements.checkId;
+          if (![...select.options].some((option) => option.value === id)) select.add(new Option(job.input.name, id));
+          select.value = id;
+          await chooseArticleCheck(id);
+          byId("article-tools").scrollIntoView({ block: "nearest" });
+        });
+      }
       if (job.input.historical) {
         action("按当前配置复测", () => submitGeo({ baselineId: id, useCurrentConfiguration: true }));
       } else {
@@ -505,9 +526,56 @@ function form(id, handler) {
     catch (error) { message(error.message); }
   });
 }
-form("article-source", async ({ url }) => {
+async function chooseArticleCheck(id) {
+  clearTimeout(articleTimer);
+  const selection = ++articleSelection;
+  const elements = byId("article-optimization").elements;
+  const status = byId("article-evidence-status");
+  const sourceForm = byId("article-source");
   articleSource = undefined;
-  await submitJob({ kind: "article-source", target: { url } });
+  if (!id) { status.textContent = ""; return; }
+  elements.title.value = "";
+  elements.text.value = "";
+  status.textContent = "正在载入检测结果…";
+  const path = projectPath();
+  async function load() {
+    try {
+      const result = await api(path + "/jobs/" + id + "/article");
+      if (articleSelection !== selection) return;
+      if (!elements.title.value) elements.title.value = result.article?.title || result.title;
+      sourceForm.elements.url.value = result.url;
+      if (result.article) {
+        articleSource = result.sourceId;
+        if (!elements.text.value.trim()) elements.text.value = result.article.text;
+        status.textContent = "已带入 GEO 结果、正文" + (result.article.imageCount ? "和 " + result.article.imageCount + " 张配图" : "") + "。";
+      } else if (["queued", "running"].includes(result.status)) {
+        status.textContent = "正文和配图正在准备，也可以先按 GEO 结果生成建议。";
+        articleTimer = setTimeout(() => void load(), 1500);
+      } else {
+        status.textContent = result.canUseEvidence
+          ? "可按 GEO 结果直接生成建议。补充正文后可以逐段分析。"
+          : "暂时没有可用材料，请读取文章或粘贴正文。";
+      }
+    } catch (error) {
+      if (articleSelection === selection) status.textContent = error.message;
+    }
+  }
+  await load();
+}
+
+byId("article-optimization").elements.checkId.addEventListener("change", (event) => {
+  void chooseArticleCheck(event.currentTarget.value);
+});
+form("article-source", async ({ url }) => {
+  articleSelection++;
+  clearTimeout(articleTimer);
+  articleSource = undefined;
+  const selected = byId("article-optimization").elements.checkId.value;
+  const path = projectPath();
+  const current = selected && await api(path + "/jobs/" + selected + "/article");
+  if (activeProject && path === projectPath()) {
+    await submitJob({ kind: "article-source", target: { url, checkId: current?.url === url.trim() ? selected : undefined } });
+  }
 });
 byId("article-optimization").addEventListener("submit", async (event) => {
   event.preventDefault();

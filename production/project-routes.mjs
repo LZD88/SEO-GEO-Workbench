@@ -1,7 +1,8 @@
 import { pipeline } from "node:stream/promises";
 import { inTransaction } from "./db.mjs";
 import { prepareGeo, prepareRetest } from "./geo.mjs";
-import { prepareArticleOptimization, prepareArticleSource } from "./article-jobs.mjs";
+import { articleEvidence, findArticleJob, prepareArticleOptimization, prepareArticleSource } from "./article-jobs.mjs";
+import { hasArticleEvidence } from "../public/article-evidence.js";
 import { availablePlatforms } from "./vision.mjs";
 import { prepareGeoMonitor, readMonitor, runMonitor, saveMonitor } from "./monitoring.mjs";
 import { geoComparison, geoMeasurement } from "./geo-metrics.mjs";
@@ -33,12 +34,30 @@ export function createProjectRoutes({ pool, platforms, artifacts, sourceReady = 
       } else if (payload.kind === "article-source") {
         if (!sourceReady) throw new HttpError(503, "文章读取服务暂不可用。");
         prepared = prepareArticleSource(payload.target);
+        if (payload.target.checkId) {
+          const check = await getJob(db, { ...scope, jobId: payload.target.checkId });
+          if (check.kind !== "geo" || check.input.kind !== "article" || check.input.url !== prepared.input.url) {
+            throw new HttpError(409, "文章链接与关联检测不一致。");
+          }
+          prepared.baselineId = check.id;
+        }
       } else if (payload.kind === "article-optimization") {
         prepared = await prepareArticleOptimization(db, scope, payload.target, platforms, { artifactReady: Boolean(artifacts) });
       } else {
         throw new HttpError(400, "请选择支持的任务类型。");
       }
-      return enqueue(db, { ...scope, kind: payload.kind, requestKey, ...prepared });
+      const job = await enqueue(db, { ...scope, kind: payload.kind, requestKey, ...prepared });
+      if (sourceReady && payload.kind === "geo" && prepared.input.kind === "article" && !payload.failedOnly) {
+        try {
+          await enqueue(db, {
+            ...scope, kind: "article-source", requestKey: "geo-source:" + job.id, baselineId: job.id,
+            ...prepareArticleSource({ url: prepared.input.url }),
+          });
+        } catch (error) {
+          if (!(error instanceof HttpError) || error.status !== 429) throw error;
+        }
+      }
+      return job;
     });
   }
 
@@ -165,6 +184,20 @@ export function createProjectRoutes({ pool, platforms, artifacts, sourceReady = 
     if (req.method !== "GET") throw new HttpError(404, "资源不存在。");
     await requireProject(pool, userId, scope.workspaceId, scope.projectId);
     const keys = [scope.workspaceId, scope.projectId];
+    if (section === "jobs" && id && action === "article") {
+      const check = await getJob(pool, { ...scope, jobId: id });
+      if (check.kind !== "geo" || check.input.kind !== "article") throw new HttpError(404, "找不到这篇文章的检测记录。");
+      const source = await findArticleJob(pool, scope, check);
+      const snapshot = source?.status === "succeeded"
+        ? (await getJob(pool, { ...scope, jobId: source.id })).steps[0]?.result : null;
+      const article = snapshot ? {
+        title: snapshot.title, text: snapshot.text, imageCount: snapshot.images?.length ?? 0, omittedImages: snapshot.omittedImages,
+      } : null;
+      return sendJson(res, 200, {
+        title: check.input.name, url: check.input.url, status: source?.status ?? "missing", sourceId: source?.id,
+        canUseEvidence: hasArticleEvidence(articleEvidence(check)), article,
+      });
+    }
     if (section === "jobs" && !action) {
       if (id) {
         const job = await getJob(pool, { ...scope, jobId: id });
@@ -184,6 +217,7 @@ export function createProjectRoutes({ pool, platforms, artifacts, sourceReady = 
       const { rows } = await pool.query(`
         SELECT id,kind,status,created_at,finished_at,input->>'name' AS name,input->>'url' AS url,input->>'kind' AS target_kind
         FROM yaosight.jobs j WHERE workspace_id=$1 AND project_id=$2
+          AND NOT (kind='article-source' AND request_key LIKE 'geo-source:%')
           AND ($3::uuid IS NULL OR (j.created_at,j.id) < (
             SELECT created_at,id FROM yaosight.jobs WHERE workspace_id=$1 AND project_id=$2 AND id=$3
           ))

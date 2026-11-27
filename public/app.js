@@ -1,6 +1,7 @@
 import { initTheme } from "./theme.js";
 import { setupOverview } from "./overview.js";
 import { setupArticleAgent } from "./article-agent.js";
+import { articleAdvice } from "./article-evidence.js";
 
 initTheme();
 const overview = setupOverview(api);
@@ -441,27 +442,20 @@ function retestAction(check) {
   return controls;
 }
 
-function renderGeoAdvice(kind, successful, hits, hasFailures) {
-  const advice = [];
-  if (!successful.length) {
-    advice.push(["稍后再试", "可以换一个 AI 平台，或等服务恢复后再检测。"]);
-  } else if (kind === "article") {
-    if (hits.length) {
-      advice.push(["保留已被引用的原文入口", "保留被引用的网址，及时更新对应段落。用相同的问题和平台复测，观察引用是否持续。"]);
-    } else if (successful.some((sample) => sample.textMatch)) {
-      advice.push(["核对平台的来源列表", "本次回答正文出现了原文链接。复测时保持问题一致，留意原文链接是否也出现在平台的来源列表里。"]);
+function renderGeoAdvice(kind, samples) {
+  const successful = samples.filter((sample) => !sample.pending && !sample.error);
+  const advice = kind === "article" ? articleAdvice(samples) : [];
+  if (kind === "brand") {
+    if (!successful.length) {
+      advice.push(["稍后再试", "可以换一个 AI 平台，或等服务恢复后再检测。"]);
+    } else if (successful.some((sample) => sample.mentioned)) {
+      advice.push(["核对品牌被推荐的理由", "展开回答，检查品牌描述和适用场景是否准确。把需要澄清的事实补到官网，再用相同问题复测。"]);
     } else {
-      advice.push(["让原文直接回答检测问题", "在文章开头给出一段可独立理解的答案，再用贴合问题的小标题组织步骤、示例和来源。发布后用相同问题复测。"]);
+      advice.push(["围绕客户的选型问题补内容", "在官网用统一的品牌名说明适用人群、实际场景和案例。用不带品牌名的客户问题复测，观察自然提及。"]);
     }
-
-  } else if (hits.length) {
-    advice.push(["核对品牌被推荐的理由", "展开回答，检查品牌描述和适用场景是否准确。把需要澄清的事实补到官网，并用相同问题复测。"]);
-  } else {
-    advice.push(["围绕客户的选型问题补内容", "在官网用统一的品牌名说明适用人群、实际场景和案例。用不带品牌名的客户问题复测，观察自然提及。"]);
-  }
-
-  if (successful.length && hasFailures) {
-    advice.push(["重试未返回的平台", "点击下方的重试按钮，可以补齐没拿到的回答。"]);
+    if (successful.length && samples.some((sample) => sample.error)) {
+      advice.push(["重试未返回的平台", "点击下方的重试按钮，可以补齐没拿到的回答。"]);
+    }
   }
 
   const section = element("section", "", "geo-advice");
@@ -494,13 +488,11 @@ async function showResult(id, updating = false) {
       resultBox.replaceChildren(headline, element("p", note));
       return;
     }
-    const successful = samples.filter((sample) => !sample.pending && !sample.error);
-    const hits = successful.filter((sample) => check.kind === "article" ? sample.cited : sample.mentioned);
     const details = element("p", geoOverview(check), "history-takeaway");
     const note = measuredAt ? dates(measuredAt) : "";
     resultBox.replaceChildren(headline, details, element("p", note, "hint"));
     if (state !== "running") {
-      const advice = renderGeoAdvice(check.kind, successful, hits, samples.some((sample) => sample.error));
+      const advice = renderGeoAdvice(check.kind, samples);
       if (check.kind === "article") {
         const action = element("button", "帮我优化这篇文章 →", "text-link advice-action");
         action.type = "button";

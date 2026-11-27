@@ -162,14 +162,19 @@
       </section>
       <section id="optimize-view" aria-labelledby="optimize-title" hidden>
         <div class="page-heading with-action">
-          <div><h1 id="optimize-title">文章优化 Agent</h1><p>分析正文和 GEO 检测样本，生成修改建议、改写示例与复测计划。</p></div>
+          <div><h1 id="optimize-title">文章优化 Agent</h1><p>选一篇刚测过的文章，接着 GEO 结果生成详细优化建议。</p></div>
           <a class="button quiet" href="#history">检测记录 <span aria-hidden="true">↗</span></a>
         </div>
         <div class="workspace-grid article-workspace">
           <form id="optimize-form" class="panel form" aria-labelledby="optimize-form-title">
             <div class="panel-heading form-heading"><h2 id="optimize-form-title">分析资料</h2></div>
+            <div class="field">
+              <label for="optimize-check">从 GEO 检测记录选择 <span>选填</span></label>
+              <select id="optimize-check"><option value="">直接填写或导入新文章</option></select>
+              <p id="optimize-check-status" class="notice" role="status"></p>
+            </div>
             <div id="optimize-context" class="article-context" hidden>
-              <div><span>关联 GEO 检测</span><strong id="optimize-context-title"></strong></div>
+              <div><span>关联 GEO 检测</span><strong id="optimize-context-title"></strong><p id="optimize-previous-advice" class="hint"></p></div>
               <button id="optimize-detach" class="text-link" type="button">解除关联</button>
             </div>
             <div class="field">

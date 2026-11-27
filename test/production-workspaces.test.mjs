@@ -384,7 +384,9 @@ test("article workflow gates vision, preserves partial images, and publishes a s
   const root = "/api/workspaces/" + space.id + "/projects/" + project.id;
   const fetchToken = randomBytes(32).toString("base64url");
   const image = Buffer.from("89504e470d0a1a0a00", "hex").toString("base64");
+  let reads = 0;
   const fetcher = createFetchServer({ token: fetchToken, async article() {
+    reads++;
     return { title: "Guide", text: "Example article content. A useful first paragraph with a figure. [图1]",
       images: [{ number: 1, type: "image/png", base64: image }], omittedImages: 1, truncated: true };
   } });
@@ -435,6 +437,32 @@ test("article workflow gates vision, preserves partial images, and publishes a s
   const downloaded = await send(root + "/reports/" + report.steps[0].result.artifact, { token: session });
   assert.equal(downloaded.status, 200);
   assert.match(await downloaded.text(), /优化建议/u);
+  const geo = await submit("geo-with-article", { kind: "geo", target: {
+    kind: "article", name: "Guide", url: "https://example.com/", platforms: ["gemini"],
+  } });
+  assert.equal(geo.status, 202, await geo.clone().text());
+  const { id: checkId } = await geo.json();
+  const checkURL = root + "/jobs/" + checkId + "/article";
+  assert.equal((await (await send(checkURL, { token: session })).json()).status, "queued");
+  assert.equal((await send(otherPath + "/jobs/" + checkId + "/article", { token: session })).status, 404);
+  const combined = {
+    ...handlers,
+    geo: async () => ({ state: "succeeded", units: 1, result: { answer: "Guide", model: "Gemini" } }),
+  };
+  await runJob(pool, combined, { log() {} });
+  await runJob(pool, combined, { log() {} });
+  const linked = await (await send(checkURL, { token: session })).json();
+  assert.equal(linked.article.imageCount, 1);
+  assert.equal(linked.canUseEvidence, true);
+  assert.equal(reads, 2);
+  const reuse = await submit("optimize-snapshot", { kind: "article-optimization", target: { checkId, title: "Guide", platform: "gemini" } });
+  assert.equal(reuse.status, 202, await reuse.clone().text());
+  await runJob(pool, combined, { log() {} });
+  const reused = await getJob(pool, { ...scope, jobId: (await reuse.json()).id });
+  assert.equal(reused.status, "succeeded");
+  assert.equal(reused.steps[0].result.checkId, checkId);
+  assert.equal(usedVision, 2);
+  assert.equal(reads, 2);
   await pool.query("UPDATE yaosight.vision_checks SET expires_at=now()");
   assert.equal((await submit("expired", payload)).status, 409);
 });

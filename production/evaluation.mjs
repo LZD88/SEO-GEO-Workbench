@@ -86,6 +86,7 @@ export function publicJob(job, { measurement, comparison, seoComparison } = {}) 
   const { name, url, historical } = job.input;
   return {
     id, kind, status, created_at, finished_at, baseline_id,
+    targetKind: kind === "geo" ? job.input.kind : undefined,
     input: { name, url, historical },
     steps: job.steps.map((step) => publicStep(kind, step)),
     measurement: measurement?.map(({ id, valid, nativeCitations, entities }) => ({

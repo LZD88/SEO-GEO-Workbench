@@ -4,6 +4,7 @@ import { HttpError, isUuid } from "./http.mjs";
 import { getJob } from "./jobs.mjs";
 import { hasVerifiedVision } from "./vision.mjs";
 import { modelOutcome } from "./geo.mjs";
+import { hasArticleEvidence } from "../public/article-evidence.js";
 
 export function prepareArticleSource(target) {
   let url;
@@ -17,10 +18,36 @@ export function prepareArticleSource(target) {
   return { input, steps: [{ category: "source_limit", estimate: 1, input }] };
 }
 
+export function articleEvidence(job) {
+  return {
+    ...job.input, id: job.id, state: job.status,
+    samples: job.steps.map(({ result, state }) => ({
+      ...result, error: state !== "succeeded" ? "该样本未完成。" : result?.error,
+    })),
+  };
+}
+
+export async function findArticleJob(db, scope, check) {
+  const visited = new Set();
+  let current = check;
+  while (!visited.has(current.id)) {
+    visited.add(current.id);
+    const { rows: [source] } = await db.query(`
+      SELECT id, status FROM yaosight.jobs WHERE workspace_id=$1 AND project_id=$2 AND kind='article-source'
+        AND baseline_id=$3 ORDER BY created_at DESC, id DESC LIMIT 1
+    `, [scope.workspaceId, scope.projectId, current.id]);
+    if (source) return source;
+    if (current.input.comparisonMode !== "retry" || !current.baseline_id) return null;
+    current = await getJob(db, { ...scope, jobId: current.baseline_id });
+  }
+  return null;
+}
+
 export async function prepareArticleOptimization(db, scope, payload, platforms, { artifactReady }) {
   if (!artifactReady) throw new HttpError(503, "报告存储暂不可用。");
   if (!(await hasVerifiedVision(db, platforms, payload?.platform))) throw new HttpError(409, "请选择已验证支持识图的模型。");
-  const { title, text, question, platform } = payload;
+  const { title, question, platform } = payload;
+  const text = typeof payload.text === "string" && !payload.text.trim() ? undefined : payload.text;
   const checkId = payload.checkId || undefined;
   const sourceId = payload.sourceId || undefined;
   if (typeof title !== "string" || title.trim().length < 1 || title.length > 180 ||
@@ -28,20 +55,23 @@ export async function prepareArticleOptimization(db, scope, payload, platforms, 
       (question !== undefined && (typeof question !== "string" || question.length > 240))) {
     throw new HttpError(400, "请填写有效的标题和正文。");
   }
-  if (sourceId) {
-    const source = await getJob(db, { ...scope, jobId: sourceId });
-    if (source.kind !== "article-source" || source.status !== "succeeded") throw new HttpError(409, "文章读取尚未完成。");
-  } else if (!text) {
-    throw new HttpError(400, "请先导入或粘贴文章正文。");
+  const check = checkId ? await getJob(db, { ...scope, jobId: checkId }) : null;
+  if (check && (check.kind !== "geo" || check.input.kind !== "article" || ["queued", "running"].includes(check.status))) {
+    throw new HttpError(409, "请选择已完成的文章 GEO 检测。");
   }
-  if (checkId) {
-    const check = await getJob(db, { ...scope, jobId: checkId });
-    if (check.kind !== "geo" || check.input.kind !== "article" || ["queued", "running"].includes(check.status)) {
-      throw new HttpError(409, "请选择已完成的文章 GEO 检测。");
-    }
+  const saved = check && !sourceId && !text ? await findArticleJob(db, scope, check) : null;
+  const selectedSource = sourceId ?? (saved?.status === "succeeded" ? saved.id : undefined);
+  if (selectedSource) {
+    const source = await getJob(db, { ...scope, jobId: selectedSource });
+    if (source.kind !== "article-source" || source.status !== "succeeded") throw new HttpError(409, "文章读取尚未完成。");
+    if (check && source.input.url !== check.input.url) throw new HttpError(409, "正文与所选检测的文章链接不一致。");
+  }
+  const evidenceOnly = !text && !selectedSource;
+  if (evidenceOnly && !(check && hasArticleEvidence(articleEvidence(check)))) {
+    throw new HttpError(400, "请先选择有结果的文章检测，或补充文章正文。");
   }
   const configuration = platforms.configuration(platform);
-  const input = { name: title, title, text, question, platform, checkId, sourceId, configuration };
+  const input = { name: title, title, text, question, platform, checkId, sourceId: selectedSource, configuration, evidenceOnly };
   return { input, steps: [{ channel: platform, category: "model_limit", estimate: 1, input }] };
 }
 
@@ -80,7 +110,7 @@ export function createArticleHandlers(pool, platforms, { fetchService, token, ar
       const checks = { async result(id) {
         if (id !== checkId || !isUuid(id)) throw new HttpError(404, "资源不存在。");
         const check = await getJob(pool, { ...scope, jobId: id });
-        return { ...check.input, id: check.id, state: check.status, samples: check.steps.map(({ result }) => result ?? {}) };
+        return articleEvidence(check);
       } };
       let report;
       try {

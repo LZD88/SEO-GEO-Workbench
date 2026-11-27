@@ -125,6 +125,7 @@ export function createGeoChecks({ dataDir, legacyDataDir, platforms }) {
   const file = (id) => join(dataDir, id + ".json");
 
   async function read(id) {
+    if (typeof id !== "string" || !checkIdPattern.test(id)) return null;
     try { return JSON.parse(await readFile(file(id), "utf8")); }
     catch (error) {
       if (error.code === "ENOENT") return null;
@@ -142,11 +143,12 @@ export function createGeoChecks({ dataDir, legacyDataDir, platforms }) {
     return { id, kind, name, url, question, createdAt, baselineId, comparisonMode, sampleCount: row.sampleCount ?? 1, state: stateOf(row) };
   }
 
-  async function list(limit = 30) {
+  async function list(limit = 30, { kind, state } = {}) {
     await mkdir(dataDir, { recursive: true });
     const names = (await readdir(dataDir)).filter((name) => /^(?:[a-f0-9]{64}|[a-f0-9-]{36})\.json$/.test(name));
     const rows = await Promise.all(names.map((name) => read(name.slice(0, -5))));
-    return rows.filter(Boolean).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map(summary);
+    return rows.filter((row) => row && (!kind || row.kind === kind) && (!state || stateOf(row) === state))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map(summary);
   }
 
   async function sample(check, platform, number, search) {
