@@ -1,0 +1,9 @@
+{
+  "node": "24.22.1",
+  "niubigeo": "6f0eeeb11b4319e845b491a5067d2cfdc8d07b52",
+  "siteone": {
+    "version": "2.5.1",
+    "linuxX64AssetId": "459279687",
+    "linuxX64Sha256": "09278d958d4a087fa46093805cd33b085b96618001dd31d45c448ad724c9024e"
+  }
+}

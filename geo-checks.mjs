@@ -7,7 +7,7 @@ import { KeywordMonitorStore } from "./vendor/niubigeo/dist/src/product/keyword-
 import { ProductProjectFileStore } from "./vendor/niubigeo/dist/src/product/projects/project-store.js";
 
 const checkIdPattern = /^(?:[a-f0-9]{64}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/;
-const promptVersion = 1;
+export const promptVersion = 1;
 const trackingParameters = new Set(["gclid", "dclid", "fbclid", "msclkid", "mc_cid", "mc_eid", "igshid", "gbraid", "wbraid"]);
 
 export class GeoError extends Error {
@@ -41,7 +41,7 @@ function website(value) {
   return url;
 }
 
-function normalize(payload) {
+export function normalizeGeoTarget(payload) {
   const { kind } = payload;
   if (!["article", "brand"].includes(kind)) throw new GeoError(400, "请选择检测类型。");
   const article = kind === "article";
@@ -60,7 +60,7 @@ function sourceUrl(raw) {
   } catch { /* Provider supplied an invalid citation. */ }
 }
 
-function citationKey(url) {
+export function citationKey(url) {
   const copy = new URL(url);
   for (const name of new Set(copy.searchParams.keys())) {
     if (name.toLowerCase().startsWith("utm_") || trackingParameters.has(name.toLowerCase())) copy.searchParams.delete(name);
@@ -94,6 +94,31 @@ export function modelFailureMessage(error) {
   return Object.hasOwn(failures, error?.code) ? failures[error.code] : "模型暂时无法完成检测，请稍后重试。";
 }
 
+export async function measureGeoSample(check, platforms, platform, number, search) {
+  const identity = { platformId: platform.id, model: platform.label, number };
+  const prompt = "请用简体中文回答以下问题。有可靠来源时请给出链接；不确定时请明确说明。\n\n" + check.question;
+  const response = await platforms.answer(platform.id, prompt, { webSearch: search });
+  const answer = response.text?.trim();
+  if (!answer) throw Object.assign(new Error("Empty model answer"), { code: "empty_answer" });
+  const sources = response.citations.flatMap((citation) => {
+    const url = sourceUrl(citation.url);
+    return url ? [{ url: url.href, type: citation.source === "answer_text_url" ? "text" : "citation" }] : [];
+  });
+  const matches = sources.filter((source) => citationKey(source.url) === citationKey(check.url));
+  const reportedModel = response.rawProviderResponse?.modelVersion ?? response.rawProviderResponse?.model;
+  const modelVersion = typeof reportedModel === "string" ? reportedModel.trim().slice(0, 150) : undefined;
+  return {
+    ...identity,
+    modelVersion,
+    answer: answer.slice(0, 16000),
+    sources: [...matches, ...sources.filter((source) => !matches.includes(source))].slice(0, 25),
+    mentioned: check.kind === "brand" && containsConfiguredIdentity(answer, check.name),
+    cited: matches.some((source) => source.type === "citation"),
+    textMatch: matches.some((source) => source.type === "text"),
+    usedSearch: response.search?.used, measuredAt: new Date().toISOString(),
+  };
+}
+
 export function createGeoChecks({ dataDir, legacyDataDir, platforms }) {
   const legacy = new KeywordMonitorStore(new ProductProjectFileStore(legacyDataDir));
   let running;
@@ -125,31 +150,9 @@ export function createGeoChecks({ dataDir, legacyDataDir, platforms }) {
   }
 
   async function sample(check, platform, number, search) {
-    const identity = { platformId: platform.id, model: platform.label, number };
-    try {
-      const prompt = "请用简体中文回答以下问题。有可靠来源时请给出链接；不确定时请明确说明。\n\n" + check.question;
-      const response = await platforms.answer(platform.id, prompt, { webSearch: search });
-      const answer = response.text?.trim();
-      if (!answer) return { ...identity, error: "模型未返回可用回答。" };
-      const sources = response.citations.flatMap((citation) => {
-        const url = sourceUrl(citation.url);
-        return url ? [{ url: url.href, type: citation.source === "answer_text_url" ? "text" : "citation" }] : [];
-      });
-      const matches = sources.filter((source) => citationKey(source.url) === citationKey(check.url));
-      const reportedModel = response.rawProviderResponse?.modelVersion ?? response.rawProviderResponse?.model;
-      const modelVersion = typeof reportedModel === "string" ? reportedModel.trim().slice(0, 150) : undefined;
-      return {
-        ...identity,
-        modelVersion,
-        answer: answer.slice(0, 16000),
-        sources: [...matches, ...sources.filter((source) => !matches.includes(source))].slice(0, 25),
-        mentioned: check.kind === "brand" && containsConfiguredIdentity(answer, check.name),
-        cited: matches.some((source) => source.type === "citation"),
-        textMatch: matches.some((source) => source.type === "text"),
-        usedSearch: response.search?.used, measuredAt: new Date().toISOString(),
-      };
-    } catch (error) {
-      return { ...identity, error: modelFailureMessage(error), measuredAt: new Date().toISOString() };
+    try { return await measureGeoSample(check, platforms, platform, number, search); }
+    catch (error) {
+      return { platformId: platform.id, model: platform.label, number, error: modelFailureMessage(error), measuredAt: new Date().toISOString() };
     }
   }
 
@@ -178,7 +181,7 @@ export function createGeoChecks({ dataDir, legacyDataDir, platforms }) {
   }
 
   async function create(payload) {
-    const values = normalize(payload);
+    const values = normalizeGeoTarget(payload);
     const ids = payload.platforms;
     const available = new Map(platforms.list().map((entry) => [entry.id, entry]));
     if (!Array.isArray(ids) || ids.length === 0 || ids.length > available.size ||
@@ -261,7 +264,7 @@ export function createGeoChecks({ dataDir, legacyDataDir, platforms }) {
       throw new GeoError(409, "旧记录缺少配置快照，请选择按当前配置复测。");
     }
     const { kind, name, url, question } = row;
-    return start(normalize({ kind, name, url, question }), ids.map((id) => available.find((item) => item.id === id)), {
+    return start(normalizeGeoTarget({ kind, name, url, question }), ids.map((id) => available.find((item) => item.id === id)), {
       count: row.sampleCount ?? 1, baseline: row, comparisonMode: failedOnly ? "retry" : row.configuration?.length ? "matched" : "legacy",
     });
   }

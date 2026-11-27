@@ -98,7 +98,7 @@ export function createArticleOptimizer(checks, platforms) {
       try {
         response = await platforms.answer(platform.id, prompt, { maxTokens: 4000, webSearch: false, images });
       } catch (error) {
-        throw new GeoError(502, modelFailureMessage(error));
+        throw Object.assign(new GeoError(502, modelFailureMessage(error)), { cause: error });
       }
       const markdown = response.text?.trim();
       if (!markdown) throw new GeoError(502, "模型未返回可用的优化报告。");

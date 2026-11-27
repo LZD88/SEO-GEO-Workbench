@@ -1,0 +1,47 @@
+services:
+  web:
+    image: yaosight:pilot
+    build:
+      context: .
+      target: runtime
+    env_file: .env.production
+    environment:
+      BIND_HOST: 0.0.0.0
+      FETCH_SERVICE_URL: http://fetcher:8791
+    ports:
+      - "127.0.0.1:8790:8790"
+    networks: [services]
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+
+  worker:
+    image: yaosight:pilot
+    env_file: .env.production
+    environment:
+      FETCH_SERVICE_URL: http://fetcher:8791
+    command: ["node", "production/worker.mjs"]
+    networks: [services, fetch]
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+
+  fetcher:
+    image: yaosight:fetcher
+    build:
+      context: .
+      target: fetcher
+    environment:
+      FETCH_SERVICE_TOKEN: ${FETCH_SERVICE_TOKEN:?Set a dedicated random fetch service token}
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777
+    mem_limit: 384m
+    pids_limit: 64
+    networks: [fetch]
+    restart: unless-stopped
+
+networks:
+  services:
+  fetch:

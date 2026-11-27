@@ -1,0 +1,39 @@
+name: Build and test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci-only-migration
+        ports:
+          - 5432:5432
+        options: --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 3s --health-retries 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Verify pinned runtime and first-party tests
+        run: docker build --platform linux/amd64 --target test -t yaosight:test .
+      - name: Run integration tests against PostgreSQL
+        run: |
+          docker run --rm --network host \
+            -e YS_TEST_DATABASE_ADMIN_URL=postgresql://postgres:ci-only-migration@127.0.0.1:5432/postgres \
+            yaosight:test node --test 'test/production*.test.mjs'
+      - name: Verify production image and health endpoint
+        run: |
+          docker build --platform linux/amd64 -t yaosight:ci .
+          docker exec ${{ job.services.postgres.id }} psql -U postgres -c "CREATE ROLE yaosight_app LOGIN PASSWORD 'ci-only-app'"
+          docker run --rm --network host \
+            -e MIGRATION_DATABASE_URL=postgresql://postgres:ci-only-migration@127.0.0.1:5432/postgres \
+            -e DATABASE_APP_ROLE=yaosight_app yaosight:ci node production/migrate.mjs
+          docker run --rm -d --name yaosight-ci --network host \
+            -e PUBLIC_ORIGIN=https://ci.invalid -e OIDC_ISSUER=https://issuer.invalid \
+            -e OIDC_CLIENT_ID=ci-client -e OIDC_CLIENT_SECRET=ci-only-oidc \
+            -e DATABASE_URL=postgresql://yaosight_app:ci-only-app@127.0.0.1:5432/postgres yaosight:ci
+          trap 'docker logs yaosight-ci; docker stop yaosight-ci' EXIT
+          curl --fail --retry 10 --retry-connrefused --retry-delay 1 --max-time 5 http://127.0.0.1:8790/healthz

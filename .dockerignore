@@ -1,0 +1,16 @@
+**
+!*.mjs
+!production/
+!production/**
+!public/
+!public/**
+!test/
+!test/**
+!package.json
+!package-lock.json
+**/.env*
+**/tmp
+**/node_modules
+**/data
+**/*.pem
+**/*.key

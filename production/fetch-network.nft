@@ -1,0 +1,29 @@
+table inet yaosight_fetch {
+    set nonglobal_ipv4 {
+        type ipv4_addr
+        flags interval
+        elements = {
+            0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8,
+            169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24,
+            192.88.99.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24,
+            203.0.113.0/24, 224.0.0.0/4, 240.0.0.0/4
+        }
+    }
+    set nonglobal_ipv6 {
+        type ipv6_addr
+        flags interval
+        elements = { 2001::/23, 2001:db8::/32, 2002::/16, 3fff::/20 }
+    }
+    chain outbound {
+        type filter hook output priority -110; policy drop;
+        ct state established,related accept
+        # Docker's embedded resolver on an application-defined bridge.
+        ip daddr 127.0.0.11 udp dport 53 accept
+        ip daddr 127.0.0.11 tcp dport 53 accept
+        ip daddr @nonglobal_ipv4 reject
+        ip6 daddr @nonglobal_ipv6 reject
+        meta nfproto ipv4 tcp dport { 80, 443 } accept
+        ip6 daddr 2000::/3 tcp dport { 80, 443 } accept
+        reject
+    }
+}

@@ -1,0 +1,23 @@
+* { box-sizing: border-box; }
+body { margin: 0; color: #172133; background: #f2f6fb; font: 16px/1.5 Inter, system-ui, "Microsoft YaHei", sans-serif; }
+header { display: flex; justify-content: space-between; padding: 18px max(24px, calc((100vw - 900px) / 2)); background: #fff; border-bottom: 1px solid #dfe8f2; }
+header strong { font-size: 20px; white-space: nowrap; }
+header span { color: #2869bc; font-size: 16px; margin-left: 6px; }
+main { max-width: 948px; margin: 34px auto; padding: 0 24px; }
+h1 { font-size: 32px; margin-bottom: 12px; }
+h2 { font-size: 20px; margin-top: 0; }
+section { padding: 22px; margin: 20px 0; background: #fff; border: 1px solid #dbe5f1; border-radius: 14px; }
+a { color: #195cae; }
+input, select, textarea, button { font: inherit; padding: 7px 10px; border: 1px solid #bfcddd; border-radius: 7px; background: #fff; color: inherit; max-width: 100%; }
+button { background: #2165b7; border-color: #2165b7; color: #fff; cursor: pointer; }
+form:not([hidden]) { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+li { margin: 8px 0; }
+li button { margin-left: 8px; }
+output { overflow-wrap: anywhere; display: block; margin-top: 12px; }
+form label { display: grid; gap: 4px; }
+#geo-platforms label { display: inline-flex; align-items: center; margin: 0 8px 4px 0; }
+#article-tools, #job-details { border-top: 1px solid #dbe5f1; padding-top: 12px; margin-top: 18px; }
+#job-details pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+#job-details img { width: 100%; max-width: 240px; margin: 8px 8px 0 0; border-radius: 7px; vertical-align: top; }
+button:disabled { cursor: default; opacity: .5; }
+[hidden] { display: none !important; }

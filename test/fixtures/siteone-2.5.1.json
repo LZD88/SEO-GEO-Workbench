@@ -1,0 +1,130 @@
+{
+  "crawler": {
+    "version": "2.5.1.20260627"
+  },
+  "results": [
+    {
+      "cacheLifetime": null,
+      "cacheTypeFlags": 32768,
+      "elapsedTime": 0.002,
+      "extras": [],
+      "size": 233,
+      "status": "200",
+      "type": 1,
+      "url": "https://example.com/"
+    },
+    {
+      "cacheLifetime": null,
+      "cacheTypeFlags": 32768,
+      "elapsedTime": 0.003,
+      "extras": [],
+      "size": 14,
+      "status": "404",
+      "type": 1,
+      "url": "https://example.com/missing"
+    },
+    {
+      "cacheLifetime": null,
+      "cacheTypeFlags": 32768,
+      "elapsedTime": 0.003,
+      "extras": [],
+      "size": 85,
+      "status": "302",
+      "type": 9,
+      "url": "https://example.com/jump"
+    },
+    {
+      "cacheLifetime": null,
+      "cacheTypeFlags": 32768,
+      "elapsedTime": 0.003,
+      "extras": [],
+      "size": 14,
+      "status": "200",
+      "type": 1,
+      "url": "https://example.com/notitle"
+    },
+    {
+      "cacheLifetime": null,
+      "cacheTypeFlags": 32768,
+      "elapsedTime": 0.002,
+      "extras": [],
+      "size": 73,
+      "status": "200",
+      "type": 1,
+      "url": "https://example.com/duplicate"
+    }
+  ],
+  "tables": {
+    "404": {
+      "rows": [
+        {
+          "sourceUqId": "https://example.com/",
+          "statusCode": "404",
+          "url": "https://example.com/missing"
+        }
+      ]
+    },
+    "seo": {
+      "rows": [
+        {
+          "deniedByRobotsTxt": "false",
+          "description": "",
+          "h1": "",
+          "indexing": "",
+          "keywords": "",
+          "robotsIndex": "1",
+          "title": "Fixture title",
+          "urlPathAndQuery": "/"
+        },
+        {
+          "deniedByRobotsTxt": "false",
+          "description": "",
+          "h1": "",
+          "indexing": "",
+          "keywords": "",
+          "robotsIndex": "0",
+          "title": "Fixture title",
+          "urlPathAndQuery": "/duplicate"
+        },
+        {
+          "deniedByRobotsTxt": "false",
+          "description": "",
+          "h1": "",
+          "indexing": "",
+          "keywords": "",
+          "robotsIndex": "1",
+          "title": "",
+          "urlPathAndQuery": "/notitle"
+        }
+      ]
+    },
+    "non-unique-titles": {
+      "rows": [
+        {
+          "count": "2",
+          "title": "Fixture title"
+        }
+      ]
+    },
+    "redirects": {
+      "rows": [
+        {
+          "sourceUqId": "https://example.com/",
+          "statusCode": "302",
+          "targetUrl": "/duplicate",
+          "url": "https://example.com/jump"
+        }
+      ]
+    },
+    "skipped": {
+      "rows": [
+        {
+          "reason": "Robots.txt",
+          "sourceAttr": "<a href>",
+          "sourceUqId": "/",
+          "url": "/hidden"
+        }
+      ]
+    }
+  }
+}

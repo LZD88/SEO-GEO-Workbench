@@ -54,8 +54,8 @@ export function createGeoPlatforms(env = process.env) {
   }
 
   function configuration(id) {
-    const { model, search, routeFingerprint } = configured.get(id);
-    return { id, model, search, routeFingerprint };
+    const { model, search, routeFingerprint, relay } = configured.get(id);
+    return { id, model, search, routeFingerprint, channelType: relay ? "relay-api" : "direct-api" };
   }
 
   async function answer(id, prompt, { maxTokens = 2000, webSearch, images = [] } = {}) {
