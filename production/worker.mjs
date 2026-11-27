@@ -22,7 +22,7 @@ const handlers = {
 const stop = new AbortController();
 for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => stop.abort());
 try {
-  if ((await databaseVersion(pool)) < 5) throw new Error("Apply the production migrations before starting the worker");
+  if ((await databaseVersion(pool)) < 7) throw new Error("Apply the production migrations before starting the worker");
   const tick = process.env.SCHEDULE_ENABLED === "true"
     ? () => dueMonitor(pool, (db, scope, kind, configuration) =>
       kind === "seo" ? prepareSeo(db, scope, configuration) : prepareGeoMonitor(configuration, platforms))

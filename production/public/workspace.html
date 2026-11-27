@@ -11,6 +11,7 @@
   <header><strong>曜见 <span>YaoSight</span></strong><form id="logout" method="post" action="/auth/logout" hidden><button>退出</button></form></header>
   <main>
     <h1>团队工作台</h1>
+    <p>选一个站点项目，查看 AI 有没有提到你的品牌，或检查网站需要改进的地方。</p>
     <p id="feedback" role="status"></p>
     <a id="login" href="/auth/login" hidden>登录工作空间</a>
     <div id="workspace" hidden>
@@ -29,11 +30,8 @@
           <label>目标类型 <select name="kind"><option value="brand">品牌</option><option value="article">文章</option></select></label>
           <label>品牌或文章名 <input name="name" maxlength="120" required></label>
           <label>网址 <input name="url" type="url" required></label>
-          <label>检测问题 <input name="question" maxlength="240" required></label>
-          <fieldset><legend>模型渠道</legend><div id="geo-platforms"></div></fieldset>
-          <label>每渠道采样 <select name="sampleCount"><option>1</option><option>3</option><option>5</option></select></label>
-          <label><input name="webSearch" type="checkbox"> 请求联网</label>
-          <output id="geo-estimate"></output>
+          <label>想让 AI 回答什么？ <input name="question" maxlength="240" placeholder="例如：有哪些适合小团队的协作工具？"></label>
+          <fieldset><legend>选择 AI 平台</legend><div id="geo-platforms"></div></fieldset>
           <button>开始检测</button>
         </form>
         <div id="article-tools" hidden>
@@ -46,7 +44,7 @@
           <form id="article-optimization">
             <label>文章标题 <input name="title" required maxlength="180"></label>
             <label>正文 <textarea name="text" maxlength="12000" rows="5"></textarea></label>
-            <label>关联 GEO 检测标识 <input name="checkId"></label>
+            <label>结合检测结果 <select name="checkId"><option value="">仅分析文章</option></select></label>
             <label>识图模型 <select name="platform" required></select></label>
             <button>生成优化报告</button>
           </form>
@@ -59,10 +57,7 @@
           <button id="site-verify" type="button" hidden>检查 DNS 记录</button>
           <form id="start-seo" hidden>
             <label>入口网址 <input name="url" type="url" required></label>
-            <label>路径范围 <input name="path" value="/" required></label>
-            <label>页数上限 <input name="pages" type="number" min="1" max="100" value="40"></label>
-            <label>最大深度 <input name="depth" type="number" min="1" max="5" value="3"></label>
-            <label>每秒请求上限 <select name="rate"><option>1</option><option selected>2</option></select></label>
+
             <button>开始审计</button>
           </form>
         </div>
@@ -72,8 +67,7 @@
             <label>计划名称 <input name="name" required maxlength="100"></label>
             <label>频率 <select name="cadence"><option value="daily">每天</option><option value="weekly">每周</option></select></label>
             <label>每行一个 GEO 问题 <textarea name="questions" rows="3"></textarea></label>
-            <label>竞品，每行「品牌,域名,别名」 <textarea name="competitors" rows="2"></textarea></label>
-            <label>GEO 有效样本门槛（%） <input name="coverage" type="number" min="50" max="100" value="80"></label>
+            <label>想比较的其他品牌（选填，每行一个品牌名） <textarea name="competitors" rows="2"></textarea></label>
             <label><input name="active" type="checkbox"> 启用定期执行</label>
             <button type="button" id="save-geo-monitor">保存 GEO 计划</button>
             <button type="button" id="save-seo-monitor" hidden>保存 SEO 计划</button>

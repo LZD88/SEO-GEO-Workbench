@@ -252,7 +252,7 @@ test("project GEO runs and report downloads keep data and usage inside the autho
     },
   };
   const send = await client(t, pool, undefined, {
-    platforms, artifacts: {
+    platforms, evaluationAdmins: new Set([owner.id]), artifacts: {
       async read(key) {
         assert.equal(key, "test-object");
         return { Body: Readable.from(["<title>SEO demo</title>"]) };
@@ -284,8 +284,28 @@ test("project GEO runs and report downloads keep data and usage inside the autho
   await runJob(pool, { geo: (step) => executeGeo(step, platforms) }, { log: (event) => logs.push(event) });
   const job = await (await send(p1 + "/jobs/" + id, { token: viewer })).json();
   assert.equal(job.status, "succeeded");
-  assert.equal(job.steps[0].result.searchStatus, "unconfirmed");
-  assert.equal(job.steps[0].result.channelType, "relay-api");
+  assert.equal(job.steps[0].result.searchStatus, undefined);
+  assert.equal(job.steps[0].result.channelType, undefined);
+  assert.equal(job.input.configuration, undefined);
+  assert.equal((await send("/admin", { token: viewer })).status, 404);
+  assert.equal((await send("/admin", { token: u1 })).status, 200);
+  assert.equal((await send(p1 + "/evaluation/" + id, { token: viewer })).status, 404);
+  assert.equal((await send(p2 + "/evaluation", { token: u1 })).status, 404);
+  const internal = await (await send(p1 + "/evaluation/" + id, { token: u1 })).json();
+  assert.equal(internal.steps[0].result.searchStatus, "unconfirmed");
+  assert.equal(internal.steps[0].result.channelType, "relay-api");
+  assert.equal(internal.input.configuration[0].model, "model-v1");
+  const policy = { sampleCount: 3, webSearch: false, minimumCoverage: 0.8, path: "/", pages: 40, depth: 3, rate: 2 };
+  assert.equal((await send(p1 + "/evaluation", { token: viewer, method: "POST", body: policy })).status, 404);
+  assert.equal((await send(p1 + "/evaluation", { token: u1, method: "POST", body: policy })).status, 200);
+  assert.equal((await (await send(p1 + "/evaluation", { token: u1 })).json()).settings.sampleCount, 3);
+  await pool.query("UPDATE yaosight.workspace_limits SET model_limit=4 WHERE workspace_id=$1", [w1.id]);
+  const next = await send(p1 + "/jobs", { ...submit, key: "settings-take-effect" });
+  assert.equal(next.status, 202);
+  const nextId = (await next.json()).id;
+  const nextJob = await (await send(p1 + "/evaluation/" + nextId, { token: u1 })).json();
+  assert.equal(nextJob.steps.length, 3);
+  assert.equal(nextJob.input.configuration[0].search, false);
   assert.equal(job.steps[0].result.cited, true);
   assert.equal(called.length, 1);
   assert.ok(!JSON.stringify(logs).includes("One Brand"));
@@ -294,7 +314,8 @@ test("project GEO runs and report downloads keep data and usage inside the autho
     VALUES ($1,$2,'test-object','seo.html','text/html',23) RETURNING id
   `, [w1.id, first]);
   assert.equal((await send(p2 + "/reports/" + report.id, { token: u2 })).status, 404);
-  const download = await send(p1 + "/reports/" + report.id, { token: viewer });
+  assert.equal((await send(p1 + "/reports/" + report.id, { token: viewer })).status, 404);
+  const download = await send(p1 + "/reports/" + report.id, { token: u1 });
   assert.equal(download.status, 200);
   assert.equal(download.headers.get("content-disposition"), 'attachment; filename="seo.html"');
   assert.equal(await download.text(), "<title>SEO demo</title>");
@@ -323,7 +344,8 @@ test("periodic GEO freezes questions, deduplicates periods and preserves other c
   assert.deepEqual((await Promise.all([tick(), tick()])).sort(), [false, true]);
   const details = await (await send(root + "/monitors/" + id, { token })).json();
   assert.equal(details.periods.length, 1);
-  assert.equal(details.current_version, 1);
+  assert.equal(details.current_version, undefined);
+  assert.equal(details.configuration.sampleCount, undefined);
   const jobId = details.periods[0].job_id;
   const updated = await send(root + "/monitors/" + id, { token, method: "PATCH", body: {
     ...plan, active: false, configuration: { ...plan.configuration, questions: ["Changed question?"] },

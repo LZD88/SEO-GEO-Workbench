@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>曜见 YaoSight · 评测后台</title>
+  <link rel="stylesheet" href="/admin.css">
+  <script type="module" src="/admin.js"></script>
+</head>
+<body>
+  <header><a href="/admin" class="brand"><span class="brand-icon" aria-hidden="true">Y</span> 曜见 <small>YaoSight</small></a><a href="/">返回团队工作台</a></header>
+  <main>
+    <h1>评测后台</h1>
+    <p id="message" role="status"></p>
+    <section class="panel">
+      <label>工作空间 <select id="workspaces"></select></label>
+      <label>站点项目 <select id="projects"></select></label>
+    </section>
+    <div id="project-console" hidden>
+      <section class="panel">
+        <h2>评测策略</h2>
+        <form id="evaluation">
+          <label>每平台采样次数 <select name="sampleCount"><option>1</option><option>3</option><option>5</option></select></label>
+          <label class="toggle"><input type="checkbox" name="webSearch"> 对支持的平台请求联网</label>
+          <label>趋势最低有效覆盖率（%） <input type="number" name="minimumCoverage" min="50" max="100" required></label>
+          <label>SEO 抓取路径 <input name="path" required maxlength="512"></label>
+          <label>SEO 页数上限 <input type="number" name="pages" min="1" max="100" required></label>
+          <label>SEO 抓取深度 <input type="number" name="depth" min="1" max="5" required></label>
+          <label>SEO 每秒请求 <select name="rate"><option>1</option><option>2</option></select></label>
+          <p>新建检测及新保存的计划应用此策略，已有记录保留原条件。</p>
+          <button class="primary" type="submit">保存策略</button>
+        </form>
+      </section>
+      <div class="config-grid">
+        <section class="panel"><h2>模型渠道</h2><ul id="channels" class="records"></ul></section>
+        <section class="panel"><h2>SEO 原始报告</h2><ul id="reports" class="records"></ul></section>
+      </div>
+      <section class="panel"><h2>监测计划</h2><ul id="monitors" class="records"></ul></section>
+      <section class="panel"><h2>评测运行</h2><ul id="jobs" class="records"></ul><pre id="record" hidden></pre></section>
+    </div>
+  </main>
+</body>
+</html>

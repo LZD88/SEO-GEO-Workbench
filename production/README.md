@@ -30,6 +30,10 @@ docker run --rm yaosight:pilot node production/web.mjs --check
 
 报告产物模块接受一个启用了公共访问阻止的私有 S3 bucket。给应用身份分配 `object-store-policy.example.json` 的对象级权限。应用通过 AWS SDK 默认凭证链取得受限运行身份。S3 兼容自托管入口使用 HTTPS。私有报告始终通过授权接口访问。
 
+## 团队评测后台
+
+在 Web 环境中设置 `YAOSIGHT_ADMIN_ACCOUNTS`，用逗号分隔经过审核的账号 UUID。账号先通过 OIDC 加入对应空间，运营可从 `yaosight.accounts` 按身份提供方和已核实的账号查到 UUID。受授权人员登录后可打开 `/admin` 查看所属项目的评测流程、模型与原始 SEO 报告。编辑策略同时要求该工作空间的编辑权限。策略变更适用于新任务与新保存的定期计划。
+
 ## 首位团队所有者
 
 在 OIDC 客户端登记回调路径 `/auth/callback`，将公开入口和客户端密钥配置到部署环境。在可信终端运行 `node production/bootstrap.mjs "团队名" owner@example.com`，将生成的单次邀请链接交给对应邮箱的用户。链接有效两天。登录后，所有者可以在团队工作台创建项目及邀请其他成员。

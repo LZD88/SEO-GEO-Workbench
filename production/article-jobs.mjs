@@ -90,7 +90,7 @@ export function createArticleHandlers(pool, platforms, { fetchService, token, ar
         if (error?.status === 502) return { state: "failed", units: 1, category: "empty_answer" };
         return { state: "failed", units: 0, category: "report_input_invalid" };
       }
-      const document = Buffer.from(articleReportMarkdown(report));
+      const document = Buffer.from(articleReportMarkdown(report, { includeModel: false }));
       let artifact;
       try {
         const key = await artifacts.put(scope.workspaceId, scope.projectId, document, "text/markdown");

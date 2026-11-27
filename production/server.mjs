@@ -4,6 +4,7 @@ import { inTransaction } from "./db.mjs";
 import { createAuth } from "./auth.mjs";
 import { GeoError } from "../geo-checks.mjs";
 import { createProjectRoutes } from "./project-routes.mjs";
+import { adminAccounts } from "./evaluation.mjs";
 import { HttpError, nameField, readJson, requireSameOrigin, sendJson } from "./http.mjs";
 import { changeMember, inviteMember, requireProject, requireWorkspace } from "./workspaces.mjs";
 
@@ -11,9 +12,14 @@ const publicAssets = new Map([
   ["/", ["workspace.html", "text/html; charset=utf-8"]],
   ["/workspace.css", ["workspace.css", "text/css; charset=utf-8"]],
   ["/workspace.js", ["workspace.js", "text/javascript; charset=utf-8"]],
+  ["/admin", ["admin.html", "text/html; charset=utf-8"]],
+  ["/admin.js", ["admin.js", "text/javascript; charset=utf-8"]],
+  ["/admin.css", ["../../public/admin.css", "text/css; charset=utf-8"]],
 ]);
 
-export function createProductionServer({ pool, origin, settings, readiness, platforms, artifacts, sourceReady }) {
+export function createProductionServer({
+  pool, origin, settings, readiness, platforms, artifacts, sourceReady, evaluationAdmins = adminAccounts(),
+}) {
   const auth = createAuth({ pool, origin, settings });
   const projectRoutes = createProjectRoutes({ pool, platforms, artifacts, sourceReady });
 
@@ -26,6 +32,11 @@ export function createProductionServer({ pool, origin, settings, readiness, plat
       return sendJson(res, healthy ? 200 : 503, { status: healthy ? "ok" : "unavailable" });
     }
     if (req.method === "GET" && publicAssets.has(path)) {
+      if (path === "/admin") {
+        const user = await auth.session(req);
+        if (!user) { res.writeHead(303, { Location: "/auth/login" }); return res.end(); }
+        if (!evaluationAdmins.has(user.id)) throw new HttpError(404, "资源不存在。");
+      }
       const [file, contentType] = publicAssets.get(path);
       const data = await readFile(new URL("./public/" + file, import.meta.url));
       res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "no-store" });
@@ -38,7 +49,8 @@ export function createProductionServer({ pool, origin, settings, readiness, plat
     const user = await auth.session(req);
     if (!user) throw new HttpError(401, "请先登录。");
     if (req.method === "POST" && path === "/auth/logout") return auth.logout(req, res);
-    if (req.method === "GET" && path === "/api/me") return sendJson(res, 200, { email: user.email });
+    const isOperator = evaluationAdmins.has(user.id);
+    if (req.method === "GET" && path === "/api/me") return sendJson(res, 200, { email: user.email, evaluationAdmin: isOperator });
 
     if (req.method === "GET" && path === "/api/workspaces") {
       const { rows } = await pool.query(`
@@ -70,7 +82,7 @@ export function createProductionServer({ pool, origin, settings, readiness, plat
       return sendJson(res, 201, project);
     }
     if (section === "projects" && item) {
-      if (action) return projectRoutes(req, res, url, user.id, { workspaceId, projectId: item }, [action, ...rest]);
+      if (action) return projectRoutes(req, res, url, user.id, { workspaceId, projectId: item }, [action, ...rest], isOperator);
       if (req.method === "GET") return sendJson(res, 200, await requireProject(pool, user.id, workspaceId, item));
     }
     if (section === "invitations" && !item && req.method === "POST") {

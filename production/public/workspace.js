@@ -52,6 +52,8 @@ async function refresh() {
   clearTimeout(refreshTimer);
   const space = selected();
   const workspace = base();
+  const admin = byId("evaluation-admin");
+  if (admin) admin.href = space ? "/admin?workspace=" + encodeURIComponent(space.id) : "/admin";
   byId("invite-link").textContent = "";
   byId("projects").replaceChildren();
   byId("members").replaceChildren();
@@ -82,6 +84,8 @@ async function openProject(project) {
   const workspace = selected();
   activeProject = project;
   activeJob = undefined;
+  const admin = byId("evaluation-admin");
+  if (admin) admin.href = "/admin?" + new URLSearchParams({ workspace: workspace.id, project: project.id });
   byId("start-seo").reset();
   byId("monitor-feedback").textContent = "";
   byId("project").hidden = false;
@@ -114,13 +118,16 @@ async function openProject(project) {
     return option;
   });
   byId("geo-platforms").replaceChildren(...options);
+  const defaultPlatform = byId("geo-platforms").querySelector('input[value="gpt"]:enabled') ||
+    byId("geo-platforms").querySelector('input:enabled');
+  if (defaultPlatform) defaultPlatform.checked = true;
   byId("site-tools").hidden = !features.seo;
   byId("site-challenge").hidden = workspace.role === "viewer";
   byId("seo-demo").hidden = workspace.role === "viewer";
   byId("monitor-form").hidden = workspace.role === "viewer";
   byId("save-seo-monitor").hidden = !features.seo;
   if (features.seo) await refreshSite();
-  updateEstimate();
+  updateGeoButton();
   await Promise.all([jobList(), listMonitors()]);
 }
 
@@ -130,8 +137,16 @@ async function jobList() {
   const jobs = await api(projectPath() + "/jobs");
   if (activeProject !== current) return;
   lastJobs = jobs;
+  const association = byId("article-optimization").elements.checkId;
+  const previous = association.value;
+  association.replaceChildren(new Option("仅分析文章", ""), ...jobs
+    .filter(({ kind, status, target_kind }) => kind === "geo" && target_kind === "article" &&
+      ["succeeded", "partial"].includes(status))
+    .map(({ id, name }) => new Option(name, id)));
+  if ([...association.options].some(({ value }) => value === previous)) association.value = previous;
+  const titles = { geo: "AI 曝光", seo: "网站检查", "article-source": "读取文章", "article-optimization": "文章优化" };
   byId("jobs").replaceChildren(...jobs.map((job) =>
-    item((job.name || job.kind) + " · " + jobStates[job.status], "详情", () => showJob(job.id)),
+    item((job.name || titles[job.kind]) + " · " + jobStates[job.status], "查看结果", () => showJob(job.id)),
   ));
 }
 
@@ -155,7 +170,7 @@ async function showJob(id, baseline) {
     if (evidence?.answer) {
       const answer = document.createElement("details");
       const summary = document.createElement("summary");
-      summary.textContent = [evidence.configuredModel, evidence.channelType, evidence.searchStatus].filter(Boolean).join(" · ");
+      summary.textContent = "查看 AI 回答和来源";
       const body = document.createElement("p");
       body.textContent = evidence.answer;
       answer.append(summary, body);
@@ -173,8 +188,6 @@ async function showJob(id, baseline) {
       row.append(answer);
     } else if (evidence?.error) {
       row.append(" · " + evidence.error);
-    } else if (step.error_category) {
-      row.append(" · " + step.error_category);
     }
     if (job.kind === "article-source" && evidence?.text) {
       const preview = document.createElement("div");
@@ -205,14 +218,6 @@ async function showJob(id, baseline) {
       download.href = path + "/reports/" + encodeURIComponent(evidence.artifact);
       download.textContent = "下载报告";
       row.append(" ", download);
-    }
-    if (evidence?.reports) {
-      for (const { id: artifactId, name } of evidence.reports) {
-        const a = document.createElement("a");
-        a.href = path + "/reports/" + encodeURIComponent(artifactId);
-        a.textContent = name;
-        row.append(" ", a);
-      }
     }
     if (evidence?.markdown) {
       if (job.input.historical) {
@@ -251,7 +256,7 @@ async function showJob(id, baseline) {
       }
       if (!job.input.historical && job.steps.some(({ state }) => state === "failed") &&
           job.steps.every(({ state }) => ["failed", "succeeded"].includes(state))) {
-        action("只补跑失败样本", () => submitGeo({ baselineId: id, failedOnly: true }));
+        action("重试未返回的平台", () => submitGeo({ baselineId: id, failedOnly: true }));
       }
     }
   }
@@ -282,6 +287,13 @@ function para(parent, text) {
   parent.append(p);
 }
 
+const issueNames = {
+  status: "页面打不开", "broken-link": "链接失效", redirect: "页面有跳转", noindex: "页面设置了不收录",
+  canonical: "首选网址设置", "robots-blocked": "页面限制了抓取", sitemap: "站点地图", "title-missing": "缺少标题", "title-duplicate": "标题重复",
+};
+const platformNames = { gpt: "GPT", gemini: "Gemini", qwen: "千问", doubao: "豆包", deepseek: "DeepSeek", wenxin: "文心" };
+const platformName = (id) => platformNames[id] ?? id;
+
 function renderMeasurement(detail, job, baseline) {
   if (!["geo", "seo"].includes(job.kind) || ["queued", "running"].includes(job.status)) return;
   const options = lastJobs.filter((row) => row.kind === job.kind && row.id !== job.id && !["queued", "running"].includes(row.status));
@@ -293,11 +305,10 @@ function renderMeasurement(detail, job, baseline) {
   compare.addEventListener("change", () => { void showJob(job.id, compare.value).catch((error) => message(error.message)); });
   detail.append(compare);
   for (const row of job.measurement ?? []) {
-    para(detail, row.id + " · 有效 " + row.valid + "/" + row.planned + " · 正式引用 " +
-      row.nativeCitations.count + "/" + row.nativeCitations.eligible + " · 实际联网 " + row.confirmedSearch);
+    para(detail, platformName(row.id) + " · " + (row.hasResults ? (row.hasCitation ? "看到了引用" : "本次未发现原文引用") : "暂未拿到回答"));
     for (const entity of row.entities) {
-      para(detail, entity.name + " · 提及 " + entity.mention.count + "/" + entity.mention.eligible +
-        " · 无法判定 " + entity.mention.excluded + " · 引用 " + entity.cited.count + "/" + entity.cited.eligible);
+      para(detail, entity.name + " · " + (entity.mentioned ? "有提及" : "本次未发现提及") + " · " +
+        (entity.cited ? "有来源引用" : "本次未发现来源引用"));
       for (const source of entity.sources.slice(0, 10)) {
         const a = document.createElement("a");
         const url = new URL(source.url);
@@ -319,11 +330,12 @@ function renderMeasurement(detail, job, baseline) {
   for (const change of job.comparison ?? []) {
     const reasons = { configuration_changed: "采样条件变化", insufficient_samples: "有效样本不足" };
     const changeText = change.status === "comparable" ? "正式引用变动 " + (100 * change.citationDifference).toFixed(1) + " 个百分点" : reasons[change.status];
-    para(detail, change.id + " · " + changeText);
+    para(detail, platformName(change.id) + " · " + changeText);
   }
   const latest = job.kind === "seo" && job.steps[0]?.result;
   if (!latest) return;
-  para(detail, "已抓取 " + latest.visited + " 页 · robots.txt 跳过 " + latest.skippedByRobots + " 页");
+  para(detail, "检查了 " + latest.visited + " 个网址。" +
+    (latest.findings.length ? "建议先处理下面标为「严重」的问题。" : "这次检查没发现需要列出的常见问题。"));
   const issues = job.seoComparison ?? latest.findings;
   const filter = document.createElement("select");
   filter.setAttribute("aria-label", "筛选问题严重度");
@@ -338,7 +350,8 @@ function renderMeasurement(detail, job, baseline) {
       (issue.url + " " + issue.rule).toLowerCase().includes(query.value.trim().toLowerCase()),
     );
     rows.replaceChildren(...selected.map((issue) => item(
-      [issue.severity, states[issue.state], issue.rule, issue.url, issue.recommendation, JSON.stringify(issue.evidence)].filter(Boolean).join(" · "),
+      [issue.severity, states[issue.state], issueNames[issue.rule], issue.url, issue.recommendation,
+        issue.evidence?.target && "相关页面 " + issue.evidence.target].filter(Boolean).join(" · "),
     )));
   };
   filter.addEventListener("change", draw);
@@ -351,14 +364,13 @@ function geoTarget() {
   const data = new FormData(byId("new-geo"));
   return {
     kind: data.get("kind"), name: data.get("name"), url: data.get("url"), question: data.get("question"),
-    platforms: data.getAll("platforms"), sampleCount: Number(data.get("sampleCount")), webSearch: data.has("webSearch"),
+    platforms: data.getAll("platforms"),
   };
 }
 
 function seoTarget() {
   const data = new FormData(byId("start-seo"));
-  return { url: data.get("url"), path: data.get("path"), pages: Number(data.get("pages")),
-    depth: Number(data.get("depth")), rate: Number(data.get("rate")) };
+  return { url: data.get("url") };
 }
 
 async function refreshSite() {
@@ -385,16 +397,16 @@ async function listMonitors() {
       const detail = await api(path + "/monitors/" + monitor.id);
       if (activeProject !== current) return;
       const output = byId("monitor-feedback");
-      output.textContent = monitor.name + " · 版本 " + detail.current_version + " · " + detail.time_zone;
+      output.textContent = monitor.name + " · " + (detail.cadence === "daily" ? "每天" : "每周");
       for (const period of detail.trend ?? []) {
         const plans = period.models.map((model) => {
           const difference = period.changes.find(({ id }) => id === model.id);
           const delta = difference?.status === "comparable" ? "，变动 " + (100 * difference.citationDifference).toFixed(1) + " 个百分点"
             : difference?.status === "configuration_changed" ? "，条件变化" : "";
-          return model.id + " 有效 " + model.valid + "/" + model.planned + " · 引用 " +
-            model.nativeCitations.count + "/" + model.nativeCitations.eligible + delta;
+          return platformName(model.id) + " · " +
+            (model.hasResults ? (model.hasCitation ? "有引用" : "未发现引用") : "暂无回答") + delta;
         });
-        para(output, new Date(period.slot).toLocaleDateString("zh-CN") + " · 问题集 v" + period.questionSetVersion + " · " + plans.join(" / "));
+        para(output, new Date(period.slot).toLocaleDateString("zh-CN") + " · " + plans.join(" / "));
       }
       for (const period of detail.periods) {
         const summary = new Date(period.slot).toLocaleString("zh-CN") + " · " + (period.job_id ? "已提交" : "未运行");
@@ -406,20 +418,16 @@ async function listMonitors() {
       const form = byId("monitor-form");
       for (const field of ["name", "cadence"]) form.elements[field].value = detail[field];
       form.elements.active.checked = detail.active;
-      form.elements.coverage.value = (detail.configuration.minimumCoverage ?? 0.8) * 100;
       form.elements.questions.value = detail.configuration.questions?.join("\n") ?? "";
-      form.elements.competitors.value = (detail.configuration.competitors ?? []).map((row) => [row.name, row.domains[0], row.aliases[0]].filter(Boolean).join(",")).join("\n");
+      form.elements.competitors.value = (detail.configuration.competitors ?? []).map((row) => row.name).join("\n");
       if (detail.kind === "geo") {
         const geo = byId("new-geo");
-        for (const field of ["kind", "name", "url", "sampleCount"]) geo.elements[field].value = detail.configuration[field];
-        geo.elements.webSearch.checked = detail.configuration.webSearch === true;
+        for (const field of ["kind", "name", "url"]) geo.elements[field].value = detail.configuration[field];
         for (const checkbox of geo.querySelectorAll('[name="platforms"]')) checkbox.checked = detail.configuration.platforms.includes(checkbox.value);
-        updateEstimate();
+        updateGeoButton();
       } else {
         const seo = byId("start-seo");
-        for (const field of ["url", "path", "pages", "depth", "rate"]) {
-          if (detail.configuration[field] !== undefined) seo.elements[field].value = detail.configuration[field];
-        }
+        seo.elements.url.value = detail.configuration.url;
       }
       output.append(item("手动执行", "立即运行", async () => {
         const job = await api(path + "/monitors/" + monitor.id + "/run", "POST", {}, crypto.randomUUID());
@@ -441,19 +449,18 @@ async function saveMonitor(kind) {
   const form = byId("monitor-form");
   if (!form.reportValidity()) return;
   const data = new FormData(form);
-  const competitors = data.get("competitors").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
-    const [name, domain, alias] = line.split(/[,，]/).map((part) => part.trim());
-    return { name, domains: domain ? [domain] : [], aliases: alias ? [alias] : [] };
-  });
+  const names = data.get("competitors").split("\n").map((line) => line.trim()).filter(Boolean);
+  const existingCompetitors = editedMonitor?.configuration?.competitors ?? [];
+  const competitors = names.map((name) => existingCompetitors.find((item) => item.name === name) ?? { name });
   const configuration = kind === "geo" ? {
-    ...geoTarget(), minimumCoverage: Number(data.get("coverage")) / 100,
+    ...geoTarget(),
     questions: data.get("questions").split("\n").map((line) => line.trim()).filter(Boolean), competitors,
   } : seoTarget();
   const path = projectPath();
   const existing = editedMonitor?.kind === kind ? editedMonitor : null;
   await api(path + "/monitors" + (existing ? "/" + existing.id : ""), existing ? "PATCH" : "POST", {
     kind, name: data.get("name"), cadence: data.get("cadence"), active: data.has("active"), configuration,
-    timeZone: existing?.time_zone ?? "Asia/Shanghai",
+    timeZone: "Asia/Shanghai",
   });
   if (activeProject && path === projectPath()) {
     editedMonitor = undefined;
@@ -470,16 +477,14 @@ byId("site-verify").addEventListener("click", async () => {
   catch (error) { message(error.message); }
 });
 
-function updateEstimate() {
+function updateGeoButton() {
   const form = byId("new-geo");
-  const data = new FormData(form);
-  const count = data.getAll("platforms").length;
-  byId("geo-estimate").textContent = "预计 " + count * Number(data.get("sampleCount")) + " 次请求";
-  form.querySelector("button").disabled = count === 0;
+  form.elements.question.required = form.elements.kind.value === "brand";
+  form.querySelector("button").disabled = !form.querySelector('[name="platforms"]:checked:not(:disabled)');
 }
 
 byId("refresh-jobs").addEventListener("click", () => { void jobList().catch((error) => message(error.message)); });
-byId("new-geo").addEventListener("change", updateEstimate);
+byId("new-geo").addEventListener("change", updateGeoButton);
 byId("new-geo").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
@@ -489,7 +494,7 @@ byId("new-geo").addEventListener("submit", async (event) => {
   try {
     await submitGeo({ target: geoTarget() });
   } catch (error) { message(error.message); }
-  finally { updateEstimate(); }
+  finally { updateGeoButton(); }
 });
 
 function form(id, handler) {
@@ -529,7 +534,14 @@ form("invite", async (params) => {
 
 byId("spaces").addEventListener("change", () => { void refresh().catch((error) => message(error.message)); });
 try {
-  const { email } = await api("/api/me");
+  const { email, evaluationAdmin } = await api("/api/me");
+  if (evaluationAdmin) {
+    const entry = document.createElement("a");
+    entry.id = "evaluation-admin";
+    entry.href = "/admin";
+    entry.textContent = "评测后台";
+    byId("logout").before(entry);
+  }
   message(email);
   byId("logout").hidden = false;
   workspaces = await api("/api/workspaces");

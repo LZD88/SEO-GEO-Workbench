@@ -4,6 +4,7 @@ import { createArtifactStore } from "./artifacts.mjs";
 import { createPool, databaseVersion } from "./db.mjs";
 import { verifyRuntime } from "./runtime.mjs";
 import { createProductionServer } from "./server.mjs";
+import { adminAccounts } from "./evaluation.mjs";
 
 const runtime = await verifyRuntime();
 if (process.argv.includes("--check")) {
@@ -21,7 +22,7 @@ if (process.argv.includes("--check")) {
     clientSecret: process.env.OIDC_CLIENT_SECRET,
   });
   const readiness = async () => {
-    try { return (await databaseVersion(pool)) >= 5; }
+    try { return (await databaseVersion(pool)) >= 7; }
     catch { return false; }
   };
   const platforms = createGeoPlatforms();
@@ -29,6 +30,7 @@ if (process.argv.includes("--check")) {
   const artifacts = bucket ? createArtifactStore({ bucket, region, endpoint }) : undefined;
   const server = createProductionServer({
     pool, origin, settings, readiness, platforms, artifacts, sourceReady: Boolean(process.env.FETCH_SERVICE_URL),
+    evaluationAdmins: adminAccounts(process.env.YAOSIGHT_ADMIN_ACCOUNTS),
   });
   server.listen(port, process.env.BIND_HOST ?? "127.0.0.1");
   for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => {

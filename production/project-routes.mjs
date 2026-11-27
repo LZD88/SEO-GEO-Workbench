@@ -10,6 +10,7 @@ import { seoComparison } from "./seo-metrics.mjs";
 import { enqueue, cancelJob, getJob, usage } from "./jobs.mjs";
 import { HttpError, isUuid, readJson, sendJson } from "./http.mjs";
 import { requireProject } from "./workspaces.mjs";
+import { evaluationSettings, normalizeEvaluation, publicJob, publicPlan, withEvaluation } from "./evaluation.mjs";
 
 export function createProjectRoutes({ pool, platforms, artifacts, sourceReady = false }) {
   async function submit(req, userId, scope) {
@@ -25,10 +26,10 @@ export function createProjectRoutes({ pool, platforms, artifacts, sourceReady = 
         }
         prepared = Object.hasOwn(payload, "baselineId")
           ? await prepareRetest(db, scope, payload, platforms)
-          : prepareGeo(payload.target, platforms);
+          : prepareGeo(withEvaluation("geo", payload.target, await evaluationSettings(db, scope), platforms), platforms);
       } else if (payload.kind === "seo") {
         if (!sourceReady || !artifacts) throw new HttpError(503, "站点审计服务暂不可用。");
-        prepared = await prepareSeo(db, scope, payload.target, { allowDemo: true });
+        prepared = await prepareSeo(db, scope, withEvaluation("seo", payload.target, await evaluationSettings(db, scope)), { allowDemo: true });
       } else if (payload.kind === "article-source") {
         if (!sourceReady) throw new HttpError(503, "文章读取服务暂不可用。");
         prepared = prepareArticleSource(payload.target);
@@ -63,17 +64,24 @@ export function createProjectRoutes({ pool, platforms, artifacts, sourceReady = 
         `, [scope.workspaceId, scope.projectId, monitor.id, payload.active]);
         return updated;
       }
-      return saveMonitor(db, scope, payload, (kind, config) => prepareMonitor(db, scope, kind, config), id);
+      const settings = await evaluationSettings(db, scope);
+      const configuration = withEvaluation(payload.kind, payload.configuration, settings, platforms);
+      if (payload.kind === "geo" && id && Array.isArray(configuration.competitors)) {
+        const previous = await readMonitor(db, scope, id);
+        const registered = new Map((previous.configuration.competitors ?? []).map((item) => [item.name, item]));
+        configuration.competitors = configuration.competitors.map((item) => registered.get(item?.name) ?? item);
+      }
+      return saveMonitor(db, scope, { ...payload, configuration }, (kind, config) => prepareMonitor(db, scope, kind, config), id);
     });
   }
 
-  async function download(res, scope, id) {
+  async function download(res, scope, id, isOperator) {
     if (!isUuid(id)) throw new HttpError(404, "资源不存在。");
     const { rows: [artifact] } = await pool.query(`
-      SELECT name,object_key,byte_length FROM yaosight.artifacts
+      SELECT name,object_key,byte_length,media_type FROM yaosight.artifacts
       WHERE workspace_id=$1 AND project_id=$2 AND id=$3
     `, [scope.workspaceId, scope.projectId, id]);
-    if (!artifact) throw new HttpError(404, "资源不存在。");
+    if (!artifact || (!isOperator && artifact.media_type !== "text/markdown")) throw new HttpError(404, "资源不存在。");
     if (!artifacts) throw new HttpError(503, "报告存储暂不可用。");
     let object;
     try { object = await artifacts.read(artifact.object_key); }
@@ -91,9 +99,45 @@ export function createProjectRoutes({ pool, platforms, artifacts, sourceReady = 
     return pipeline(object.Body, res);
   }
 
-  return async function route(req, res, url, userId, scope, segments) {
+  return async function route(req, res, url, userId, scope, segments, isOperator) {
     const [section, id, action, ...rest] = segments;
     if (rest.length) throw new HttpError(404, "资源不存在。");
+    if (section === "evaluation") {
+      if (!isOperator) throw new HttpError(404, "资源不存在。");
+      await requireProject(pool, userId, scope.workspaceId, scope.projectId);
+      if (req.method === "GET" && !id) {
+        const channels = (platforms?.list() ?? []).map((entry) => ({ ...entry, ...platforms.configuration(entry.id) }));
+        const { rows: reports } = await pool.query(`
+          SELECT id,name,created_at FROM yaosight.artifacts WHERE workspace_id=$1 AND project_id=$2 AND media_type<>'text/markdown'
+          ORDER BY created_at DESC LIMIT 50
+        `, [scope.workspaceId, scope.projectId]);
+        const { rows: monitors } = await pool.query(`
+          SELECT m.name,v.version,v.configuration FROM yaosight.monitors m JOIN yaosight.monitor_versions v
+          ON (m.workspace_id,m.project_id,m.id,m.current_version)=(v.workspace_id,v.project_id,v.monitor_id,v.version)
+          WHERE m.workspace_id=$1 AND m.project_id=$2 ORDER BY m.created_at DESC LIMIT 50
+        `, [scope.workspaceId, scope.projectId]);
+        return sendJson(res, 200, { settings: await evaluationSettings(pool, scope), channels, reports, monitors });
+      }
+      if (req.method === "GET" && id && !action) {
+        const job = await getJob(pool, { ...scope, jobId: id, includeStepInputs: true });
+        if (!["geo", "seo"].includes(job.kind)) throw new HttpError(404, "资源不存在。");
+        return sendJson(res, 200, job);
+      }
+      if (req.method === "POST" && !id) {
+        const settings = normalizeEvaluation(await readJson(req));
+        await inTransaction(pool, async (db) => {
+          await requireProject(db, userId, scope.workspaceId, scope.projectId, "editor", { write: true });
+          await db.query("UPDATE yaosight.projects SET evaluation_settings=$3 WHERE workspace_id=$1 AND id=$2",
+            [scope.workspaceId, scope.projectId, JSON.stringify(settings)]);
+          await db.query(`
+            INSERT INTO yaosight.audit_events(workspace_id,actor_id,action,target,result)
+            VALUES($1,$2,'evaluation.updated',$3,'success')
+          `, [scope.workspaceId, userId, scope.projectId]);
+        });
+        return sendJson(res, 200, settings);
+      }
+      throw new HttpError(404, "资源不存在。");
+    }
     if (req.method === "POST" && section === "jobs" && !id) {
       return sendJson(res, 202, await submit(req, userId, scope));
     }
@@ -128,18 +172,17 @@ export function createProjectRoutes({ pool, platforms, artifacts, sourceReady = 
         const baseline = beforeId ? await getJob(pool, { ...scope, jobId: beforeId }) : null;
         const olderSeo = baseline?.kind === "seo" && baseline.steps[0]?.result;
         const newSeo = job.kind === "seo" && job.steps[0]?.result;
-        return sendJson(res, 200, {
-          ...job, ...(job.kind === "geo" && {
-            measurement: geoMeasurement(job),
-            comparison: baseline ? geoComparison(baseline, job) : null,
-          }),
-          ...(olderSeo && newSeo && { seoComparison: seoComparison(olderSeo, newSeo) }),
-        });
+        return sendJson(res, 200, publicJob(job, {
+          measurement: job.kind === "geo" ? geoMeasurement(job) : undefined,
+          comparison: baseline && job.kind === "geo" ? geoComparison(baseline, job) : undefined,
+          seoComparison: olderSeo && newSeo && Array.isArray(olderSeo.findings) && Array.isArray(newSeo.findings)
+            ? seoComparison(olderSeo, newSeo) : undefined,
+        }));
       }
       const cursor = url.searchParams.get("before");
       if (cursor && !isUuid(cursor)) throw new HttpError(400, "分页参数无效。");
       const { rows } = await pool.query(`
-        SELECT id,kind,status,created_at,finished_at,input->>'name' AS name,input->>'url' AS url
+        SELECT id,kind,status,created_at,finished_at,input->>'name' AS name,input->>'url' AS url,input->>'kind' AS target_kind
         FROM yaosight.jobs j WHERE workspace_id=$1 AND project_id=$2
           AND ($3::uuid IS NULL OR (j.created_at,j.id) < (
             SELECT created_at,id FROM yaosight.jobs WHERE workspace_id=$1 AND project_id=$2 AND id=$3
@@ -174,7 +217,7 @@ export function createProjectRoutes({ pool, platforms, artifacts, sourceReady = 
             changes: index ? geoComparison(observations[index - 1].job, job) : [],
           }));
         }
-        return sendJson(res, 200, { ...plan, periods, trend });
+        return sendJson(res, 200, publicPlan({ ...plan, periods, trend }));
       }
       const { rows } = await pool.query(`
         SELECT id,name,kind,cadence,time_zone,active,next_run_at FROM yaosight.monitors
@@ -182,13 +225,16 @@ export function createProjectRoutes({ pool, platforms, artifacts, sourceReady = 
       `, keys);
       return sendJson(res, 200, rows);
     }
-    if (section === "platforms" && !id) return sendJson(res, 200, await availablePlatforms(pool, platforms));
+    if (section === "platforms" && !id) {
+      const list = await availablePlatforms(pool, platforms);
+      return sendJson(res, 200, list.map(({ id: platformId, label, ready, vision }) => ({ id: platformId, label, ready, vision })));
+    }
     if (section === "features" && !id) return sendJson(res, 200, {
       articleSource: sourceReady, articleReports: Boolean(artifacts), seo: sourceReady && Boolean(artifacts),
     });
     if (section === "site" && !id) return sendJson(res, 200, await getSite(pool, scope));
-    if (section === "usage" && !id) return sendJson(res, 200, await usage(pool, scope.workspaceId));
-    if (section === "reports" && id && !action) return download(res, scope, id);
+    if (section === "usage" && !id && isOperator) return sendJson(res, 200, await usage(pool, scope.workspaceId));
+    if (section === "reports" && id && !action) return download(res, scope, id, isOperator);
     if (section === "jobs" && id && action === "markdown") {
       const job = await getJob(pool, { ...scope, jobId: id });
       const markdown = job.kind === "article-optimization" && job.input.historical && job.steps[0]?.result?.markdown;
