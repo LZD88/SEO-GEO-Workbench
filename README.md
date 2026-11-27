@@ -30,3 +30,7 @@ GPT、Gemini 默认请求联网，可将 `GPT_MODEL_SEARCH` 或 `GEMINI_MODEL_SE
 全新机器先运行 `pwsh -File .\setup.ps1`。需要 Windows x64、PowerShell 7、Node.js 22.13 或更新的受支持版本、npm、Git 和网络连接。日常使用无需 Docker 或数据库。
 
 上游项目：[SiteOne Crawler（MIT）](https://github.com/janreges/siteone-crawler) · [NiubiGEO（Apache-2.0）](https://github.com/Albert-Weasker/niubigeo)。
+
+## 团队试点
+
+生产构建、PostgreSQL 迁移、邀请登录、Worker 和独立抓取进程的配置见 [团队模式部署说明](production/README.md)。
