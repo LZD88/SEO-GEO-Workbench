@@ -8,3 +8,5 @@
 4. 如需模型检测，复制 `.env.example` 为 `.env`，填入对应平台的配置后重启工作台。
 
 SEO 与 GEO 历史记录保存在本机 `data/`。
+
+支持 OpenAI 兼容的模型中转。设置 `GEO_RELAY_BASE_URL`，再填写所选平台的中转密钥和模型 ID。
