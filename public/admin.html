@@ -17,7 +17,7 @@
     <p id="message" role="status"></p>
     <section id="sign-in" class="panel sign-in" hidden>
       <h2>管理员登录</h2>
-      <p id="setup" hidden>请在项目目录运行 <code>pwsh -File .\setup-admin.ps1</code>，设置管理员密码后刷新页面。</p>
+      <p id="setup" hidden>请在项目目录运行 <code>powershell.exe -NoProfile -File .\setup-admin.ps1</code>，设置管理员密码后刷新页面。</p>
       <form id="login">
         <label for="password">管理员密码</label>
         <input id="password" name="password" type="password" autocomplete="current-password" minLength="8" maxlength="128" required>
