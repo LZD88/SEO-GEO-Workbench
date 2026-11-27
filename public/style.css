@@ -500,20 +500,33 @@ svg { display: block; }
 .text-link { color: var(--accent-dark); font-size: 13px; font-weight: 650; text-underline-offset: 3px; }
 .text-link:hover { text-decoration: underline; }
 
-.history-grid { grid-template-columns: minmax(0, 1.55fr) minmax(290px, 1fr); }
+.history-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.history-record { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.history-record-main { min-width: 0; }
+.history-list li > a { display: inline-block; margin-top: 6px; }
+.history-status { flex: none; padding: 3px 8px; border-radius: 14px; font-size: 12px; font-weight: 600; color: var(--muted); background: var(--surface); }
+.history-status[data-tone="ok"] { color: var(--accent-dark); background: var(--tint); }
+.history-status[data-tone="error"] { color: var(--error); background: var(--canvas); }
+.history-detail { padding: clamp(18px, 3vw, 32px); max-width: 900px; overflow-wrap: anywhere; }
+.history-detail > h3 { margin: 0 0 8px; font-size: clamp(19px, 2vw, 25px); }
+.history-detail > .hint { margin-top: 4px; }
+.history-takeaway { margin: 0; font-size: 17px; line-height: 1.6; }
+.simple-evidence, .seo-finding { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
+.simple-evidence-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; }
+summary.simple-evidence-title { cursor: pointer; justify-content: flex-start; flex-wrap: wrap; }
+summary.simple-evidence-title::before { content: "▸"; color: var(--accent-dark); }
+details[open] > summary.simple-evidence-title::before { content: "▾"; }
+.simple-evidence-title .hint { margin: 0; }
+.plain-sources { padding-left: 18px; margin: 6px 0; font-size: 13px; }
+.seo-finding h4 { margin: 0; font-size: 15px; }
+.seo-examples { font-size: 13px; }
+.seo-examples summary { cursor: pointer; color: var(--accent-dark); }
 .history-list li { border-top: 1px solid var(--line); padding: 13px 0; overflow-wrap: anywhere; }
 .history-list li:last-child { padding-bottom: 0; }
 .history-list .empty, .row-meta { font-size: 13px; color: var(--muted); }
 .row-title { display: block; font-size: 14px; font-weight: 650; }
 .row-meta { display: block; margin: 4px 0; line-height: 1.5; }
-.row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 7px; }
-.row-actions button { background: none; border: 0; padding: 1px 0; cursor: pointer; }
-.result { scroll-margin-top: calc(var(--top-height) + 15px); margin: 0 0 16px; padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--canvas); }
-.result h3 { margin-bottom: 6px; font-size: 15px; }
-.result p, .result li { font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
-.result ul { padding-left: 18px; margin: 8px 0 0; }
-.result details { margin-top: 4px; }
-.result summary { cursor: pointer; color: var(--accent-dark); }
+
 .answer-text { white-space: pre-wrap; margin-top: 5px; }
 .geo-advice {
   margin-top: 14px;
@@ -527,12 +540,7 @@ svg { display: block; }
 .geo-advice li + li { margin-top: 8px; }
 .geo-advice li::marker { color: var(--accent-dark); font-weight: 700; }
 .geo-advice li p { color: var(--muted); }
-.result .geo-samples { list-style: none; display: grid; gap: 8px; padding: 0; }
-.geo-sampling-options { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; margin: 14px 0 5px; }
-.geo-sampling-options .field { margin: 0; }
-.geo-platform-evidence { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
-.geo-platform-evidence h4 { margin: 0 0 4px; font-size: 14px; }
-.geo-samples > li { padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--white); }
+
 .evidence-badge { display: inline-block; margin-left: 8px; padding: 0 7px; border-radius: 9px; background: var(--surface); color: var(--muted); font-size: 11px; }
 .evidence-badge:is([data-evidence="citation"], [data-evidence="text-link"], [data-evidence="mentioned"]) { background: var(--tint); color: var(--accent-dark); }
 .evidence-badge[data-evidence="failed"] { color: var(--error); }

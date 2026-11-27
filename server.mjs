@@ -4,7 +4,7 @@ import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { articleBodyLimit, createArticleOptimizer } from "./article-optimization.mjs";
@@ -13,23 +13,28 @@ import { articleReportMarkdown, articleReportPath, createArticleReports } from "
 import { createGeoChecks, GeoError } from "./geo-checks.mjs";
 import { createGeoPlatforms } from "./geo-platforms.mjs";
 import { localAuth } from "./local-auth.mjs";
+import { createLocalAdmin, localSeoLimits } from "./local-admin.mjs";
+import { publicGeoResult, summarizeSeoReport } from "./evaluation-view.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
-const seoRoot = join(root, "data", "seo");
+const dataDir = process.env.YAOSIGHT_LOCAL_DATA_DIR ? resolve(process.env.YAOSIGHT_LOCAL_DATA_DIR) : join(root, "data");
+const seoRoot = join(dataDir, "seo");
 const host = "127.0.0.1";
-const origin = "http://" + host + ":8790";
+const port = Number(process.env.YAOSIGHT_LOCAL_PORT ?? 8790);
+if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid YAOSIGHT_LOCAL_PORT");
+const origin = "http://" + host + ":" + port;
 const dayKey = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" });
-const auth = await localAuth(join(root, "data", "account.json"));
+const auth = await localAuth(join(dataDir, "account.json"));
 const envFile = join(root, ".env");
 const localEnv = existsSync(envFile) ? parseEnv(await readFile(envFile, "utf8")) : {};
 const geoPlatforms = createGeoPlatforms({ ...localEnv, ...process.env });
 const geoChecks = createGeoChecks({
-  dataDir: join(root, "data", "checks"),
-  legacyDataDir: join(root, "data", "geo"),
+  dataDir: join(dataDir, "checks"),
+  legacyDataDir: join(dataDir, "geo"),
   platforms: geoPlatforms,
 });
 const optimizeArticle = createArticleOptimizer(geoChecks, geoPlatforms);
-const articleReports = createArticleReports(join(root, "data", "article-reports"));
+const articleReports = createArticleReports(join(dataDir, "article-reports"));
 const files = { html: "report.html", json: "report.json", log: "crawl.log" };
 const staticFiles = new Map([
   ...["/", "/home", "/login"].map((path) => [path, ["public/home.html", "text/html; charset=utf-8"]]),
@@ -41,12 +46,19 @@ const staticFiles = new Map([
   ["/style.css", ["public/style.css", "text/css; charset=utf-8"]],
   ["/app.js", ["public/app.js", "text/javascript; charset=utf-8"]],
   ["/article-agent.js", ["public/article-agent.js", "text/javascript; charset=utf-8"]],
+  ["/admin", ["public/admin.html", "text/html; charset=utf-8"]],
+  ["/admin.css", ["public/admin.css", "text/css; charset=utf-8"]],
+  ["/admin.js", ["public/admin.js", "text/javascript; charset=utf-8"]],
   ...Object.entries({ gpt: "openai", gemini: "gemini-color" })
     .map(([id, name]) => ["/platform-icons/" + id + ".svg", ["vendor/niubigeo/assets/providers/" + name + ".svg", "image/svg+xml"]]),
   ...["doubao", "qwen", "deepseek", "wenxin"]
     .map((id) => ["/platform-icons/" + id + ".png", ["public/platform-icons/" + id + ".png", "image/png"]]),
 ]);
 const jobs = new Map();
+function recentSeoJobs() {
+  return [...jobs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 30);
+}
+const admin = await createLocalAdmin({ dataDir, checks: geoChecks, platforms: geoPlatforms, seoJobs: recentSeoJobs, download: downloadRawSeo });
 let pending = false;
 let crawler;
 
@@ -120,11 +132,11 @@ async function runCrawl(job, binary) {
   try {
     const args = [
       "--url=" + job.url,
-      "--workers=2",
-      "--max-reqs-per-sec=2",
-      "--max-visited-urls=100",
-      "--max-queue-length=150",
-      "--max-depth=3",
+      "--workers=" + job.limits.workers,
+      "--max-reqs-per-sec=" + job.limits.rate,
+      "--max-visited-urls=" + job.limits.pages,
+      "--max-queue-length=" + job.limits.queue,
+      "--max-depth=" + job.limits.depth,
       "--output-html-report=" + join(dir, files.html),
       "--output-json-file=" + join(dir, files.json),
       "--output-text-file=",
@@ -133,7 +145,7 @@ async function runCrawl(job, binary) {
       const child = spawn(binary, args, { cwd: dir, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
       crawler = child;
       let expired = false;
-      const timer = setTimeout(() => { expired = true; child.kill(); }, 180_000);
+      const timer = setTimeout(() => { expired = true; child.kill(); }, job.limits.timeout);
       child.stdout.pipe(log, { end: false });
       child.stderr.pipe(log, { end: false });
       child.once("error", reject);
@@ -166,7 +178,7 @@ async function startCrawl(payload, binary) {
   if (pending || [...jobs.values()].some((job) => job.status === "running")) {
     return { status: 409, body: { error: "已有一项审计正在运行。" } };
   }
-  if (!binary) return { status: 503, body: { error: "SiteOne 尚未安装，请运行 setup.ps1。" } };
+  if (!binary) return { status: 503, body: { error: "网站检查服务尚未准备好，请联系管理员。" } };
   if (payload.demo !== true && payload.authorized !== true) {
     return { status: 400, body: { error: "请确认你有权审计这个网站。" } };
   }
@@ -176,6 +188,7 @@ async function startCrawl(payload, binary) {
     demo: payload.demo === true,
     status: "running",
     createdAt: new Date().toISOString(),
+    limits: localSeoLimits,
     files: [],
   };
   pending = true;
@@ -195,10 +208,34 @@ const demoPages = new Map([
   ["/demo/about", '<title>关于示例产品</title><meta name="description" content="这是本地 SEO 演示页。"><h1>关于</h1><a href="/demo/">返回首页</a>'],
 ]);
 
+function downloadRawSeo(res, id, kind) {
+  const job = jobs.get(id);
+  if (!job?.files.includes(kind)) return json(res, 404, { error: "报告不存在。" });
+  const file = join(jobDir(job), files[kind]);
+  if (!existsSync(file)) return json(res, 404, { error: "本地报告已移动。" });
+  res.writeHead(200, {
+    "Content-Type": "application/octet-stream",
+    "Content-Disposition": 'attachment; filename="seo-' + id.slice(0, 8) + '-' + files[kind] + '"',
+    "Cache-Control": "no-store",
+  });
+  const stream = createReadStream(file);
+  stream.once("error", () => res.destroy());
+  return stream.pipe(res);
+}
+
+function publicArticleReport({ id, title, platform, generatedAt, checkId, markdown }) {
+  return { id, title, platform, generatedAt, checkId, markdown };
+}
+
+function publicSeoJob({ id, url, demo, status, createdAt, files }) {
+  return { id, url, demo, status, createdAt, reportReady: status === "done" && files.includes("json") };
+}
+
 async function handle(req, res, binary) {
   res.setHeader("X-Content-Type-Options", "nosniff");
-  if (req.headers.host !== host + ":8790") return json(res, 421, { error: "请使用本机工作台地址。" });
+  if (req.headers.host !== host + ":" + port) return json(res, 421, { error: "请使用本机工作台地址。" });
   const path = new URL(req.url, origin).pathname;
+  if (path.startsWith("/api/admin/")) return admin.handle(req, res, path, input, json, origin);
   if (["/api/session", "/api/setup", "/api/login", "/api/logout"].includes(path)) {
     return auth.handle(req, res, path, input, json, origin);
   }
@@ -219,7 +256,7 @@ async function handle(req, res, binary) {
     try { payload = await input(req, reading ? 8192 : articleBodyLimit); }
     catch { return json(res, 400, { error: "请求格式无效或正文太长。" }); }
     try {
-      return json(res, 200, reading ? await readArticle(payload.url) : await articleReports.save(await optimizeArticle(payload)));
+      return json(res, 200, reading ? await readArticle(payload.url) : publicArticleReport(await articleReports.save(await optimizeArticle(payload))));
     } catch (error) {
       if (error instanceof GeoError) return json(res, error.status, { error: error.message });
       throw error;
@@ -228,15 +265,18 @@ async function handle(req, res, binary) {
   const articleReport = articleReportPath.exec(path);
   if (path === "/api/article-reports" || articleReport) {
     if (req.method !== "GET") return json(res, 405, { error: "不支持此请求。" });
-    if (!articleReport) return json(res, 200, await articleReports.list());
+    if (!articleReport) {
+      const reports = await articleReports.list();
+      return json(res, 200, reports.map(publicArticleReport));
+    }
     try {
       const report = await articleReports.read(articleReport[1]);
-      if (!articleReport[2]) return json(res, 200, report);
+      if (!articleReport[2]) return json(res, 200, publicArticleReport(report));
       res.writeHead(200, {
         "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "no-store",
         "Content-Disposition": 'attachment; filename="article-optimization-' + report.id.slice(0, 8) + '.md"',
       });
-      return res.end(articleReportMarkdown(report));
+      return res.end(articleReportMarkdown(report, { includeModel: false }));
     } catch (error) {
       if (error instanceof GeoError) return json(res, error.status, { error: error.message });
       throw error;
@@ -246,7 +286,9 @@ async function handle(req, res, binary) {
   if (path === "/api/geo-checks" || geoResult) {
     try {
       if (req.method === "GET") {
-        return json(res, 200, geoResult ? await geoChecks.result(geoResult[1]) : await geoChecks.list());
+        if (geoResult) return json(res, 200, publicGeoResult(await geoChecks.result(geoResult[1])));
+        const history = await geoChecks.list();
+        return json(res, 200, history.map(({ id, kind, name, createdAt, state, baselineId }) => ({ id, kind, name, createdAt, state, baselineId })));
       }
       if (req.method === "POST" && !geoResult) {
         if (req.headers["sec-fetch-site"] === "cross-site" || (req.headers.origin && req.headers.origin !== origin)) {
@@ -257,8 +299,11 @@ async function handle(req, res, binary) {
         catch { return json(res, 400, { error: "请求格式无效。" }); }
         const check = Object.hasOwn(payload, "baselineId")
           ? await geoChecks.retest(payload.baselineId, payload.useCurrentConfiguration, payload.failedOnly === true)
-          : await geoChecks.create(payload);
-        return json(res, 202, check);
+          : await geoChecks.create({
+            kind: payload.kind, name: payload.name, url: payload.url, question: payload.question, platforms: payload.platforms,
+            ...admin.geoOptions(payload.platforms),
+          });
+        return json(res, 202, { id: check.id });
       }
       return json(res, 405, { error: "不支持此请求。" });
     } catch (error) {
@@ -280,8 +325,8 @@ async function handle(req, res, binary) {
   }
   if (req.method !== "GET") return json(res, 405, { error: "不支持此请求。" });
   if (path === "/api/status") {
-    const recent = [...jobs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 30);
-    return json(res, 200, { jobs: recent, platforms: geoPlatforms.list() });
+    const platforms = geoPlatforms.list().map(({ id, label, ready, vision }) => ({ id, label, ready, vision }));
+    return json(res, 200, { jobs: recentSeoJobs().map(publicSeoJob), platforms });
   }
   if (path === "/api/overview") {
     const cutoff = Date.now() - 32 * 24 * 60 * 60 * 1000;
@@ -304,21 +349,17 @@ async function handle(req, res, binary) {
       recent: records.slice(0, 5).map(({ name, type, status, createdAt }) => ({ name, type, status, createdAt })),
     });
   }
-  const match = /^\/api\/reports\/([0-9a-f-]{36})\/(html|json|log)$/.exec(path);
-  if (match) {
-    const [, id, kind] = match;
-    const job = jobs.get(id);
-    if (!job?.files.includes(kind)) return json(res, 404, { error: "报告不存在。" });
-    const file = join(jobDir(job), files[kind]);
-    if (!existsSync(file)) return json(res, 404, { error: "本地报告已移动。" });
-    res.writeHead(200, {
-      "Content-Type": "application/octet-stream",
-      "Content-Disposition": 'attachment; filename="seo-' + id.slice(0, 8) + '-' + files[kind] + '"',
-      "Cache-Control": "no-store",
-    });
-    const stream = createReadStream(file);
-    stream.once("error", () => res.destroy());
-    return stream.pipe(res);
+  const seoResult = /^\/api\/seo-reports\/([0-9a-f-]{36})$/.exec(path);
+  if (seoResult) {
+    const job = jobs.get(seoResult[1]);
+    if (!job || !publicSeoJob(job).reportReady) return json(res, 404, { error: "暂时没有可查看的报告。" });
+    try {
+      const report = JSON.parse(await readFile(join(jobDir(job), files.json), "utf8"));
+      return json(res, 200, { ...publicSeoJob(job), ...summarizeSeoReport(report) });
+    } catch (error) {
+      if (error.code === "ENOENT") return json(res, 404, { error: "报告文件已移动。" });
+      throw error;
+    }
   }
   const item = staticFiles.get(path);
   if (item) {
@@ -349,12 +390,12 @@ if (existsSync(vendor)) {
 const server = createServer((req, res) => {
   void handle(req, res, binary).catch((error) => {
     console.error(error);
-    if (!res.headersSent) json(res, 500, { error: "工作台出错，请查看启动日志。" });
+    if (!res.headersSent) json(res, 500, { error: "工作台暂时不可用，请稍后重试。" });
     else res.destroy();
   });
 });
 server.on("error", (error) => { console.error(error.message); process.exitCode = 1; });
-server.listen(8790, host, () => {
+server.listen(port, host, () => {
   console.log("曜见 · 搜索与 AI 可见性工作台 " + origin + "/");
 });
 for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => {

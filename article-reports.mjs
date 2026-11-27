@@ -10,9 +10,9 @@ const reportDate = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai", dateStyle: "medium", timeStyle: "short",
 });
 
-export function articleReportMarkdown(report) {
+export function articleReportMarkdown(report, { includeModel = true } = {}) {
   const title = report.title.replace(/\s+/g, " ");
-  const model = [report.platform, report.model].filter(Boolean).join(" · ");
+  const model = [report.platform, includeModel && report.model].filter(Boolean).join(" · ");
   const stamp = reportDate.format(new Date(report.generatedAt));
   const source = report.checkId ? "\n\n来源 GEO 检测 " + report.checkId : "";
   return "# 文章优化报告\n\n" + title + "\n\n" + model + " · " + stamp + source + "\n\n" + report.markdown + "\n";

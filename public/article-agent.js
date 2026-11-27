@@ -258,7 +258,7 @@ export function setupArticleAgent(api) {
     byId("article-report-result").hidden = !report;
     if (!report) return;
     byId("article-report-name").textContent = report.title;
-    byId("article-report-meta").textContent = [report.platform, report.model, reportDate.format(new Date(report.generatedAt))]
+    byId("article-report-meta").textContent = [report.platform, reportDate.format(new Date(report.generatedAt))]
       .filter(Boolean).join(" · ");
     reportSource.hidden = !report.checkId;
     if (report.checkId) reportSource.href = "#history/" + report.checkId;

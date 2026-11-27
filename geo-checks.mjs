@@ -286,7 +286,12 @@ export function createGeoChecks({ dataDir, legacyDataDir, platforms }) {
       const retestMode = ["completed", "failed"].includes(row.state) && previousPlatforms(row, available).length
         ? (config.size ? "matched" : "legacy") : undefined;
       const canRetry = retestMode === "matched" && samples.some((sample) => sample.error);
-      return { ...summary(row), samples, measuredAt: row.measuredAt, retestMode, canRetry };
+      const baseline = row.baselineId && checkIdPattern.test(row.baselineId)
+        ? await read(row.baselineId).catch(() => null) : null;
+      const modelChanged = Boolean(baseline?.samples?.some((previous) => previous.modelVersion && samples.some((sample) =>
+        sample.platformId === previous.platformId && sample.number === previous.number &&
+        sample.modelVersion && sample.modelVersion !== previous.modelVersion)));
+      return { ...summary(row), samples, measuredAt: row.measuredAt, retestMode, canRetry, modelChanged };
     }
 
     const [last] = await legacy.listRuns(row.projectId, row.monitorId);
@@ -311,6 +316,15 @@ export function createGeoChecks({ dataDir, legacyDataDir, platforms }) {
     };
   }
 
-  return { create, list, result, retest };
+  async function diagnostics(id) {
+    const record = running?.id === id ? running : await read(id);
+    if (!record) throw new GeoError(404, "检测记录不存在。");
+    return {
+      ...(await result(id)), promptVersion: record.promptVersion,
+      configuration: record.configuration, target: { kind: record.kind, url: record.url, question: record.question },
+    };
+  }
+
+  return { create, list, result, retest, diagnostics };
 }
 

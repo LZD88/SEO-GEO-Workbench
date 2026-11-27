@@ -90,7 +90,7 @@
       </section>
       <section id="geo-view" aria-labelledby="geo-title" hidden>
         <div class="page-heading with-action">
-          <div><h1 id="geo-title">GEO 检测</h1><p>查看品牌或文章在 AI 回答中的提及和引用。</p></div>
+          <div><h1 id="geo-title">查看 AI 曝光</h1><p>看看 AI 有没有提到你的品牌，或把你的文章列为来源。</p></div>
           <a class="button quiet" href="#history"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>历史记录</a>
         </div>
         <div class="workspace-grid">
@@ -113,7 +113,7 @@
               </div>
             </div>
             <div class="field">
-              <label for="geo-question">检测问题 <span id="question-optional">选填</span></label>
+              <label for="geo-question">想让 AI 回答什么？ <span id="question-optional">选填</span></label>
               <textarea id="geo-question" name="question" maxlength="240" rows="3" aria-describedby="question-hint" placeholder="例如：如何为电商商品生成高质量主图？"></textarea>
               <p class="hint" id="question-hint">留空时用文章标题生成问题。原文链接仅用于比对引用。</p>
             </div>
@@ -122,19 +122,7 @@
               <div id="platforms" class="platforms"></div>
               <p id="platform-hint" class="hint">正在读取平台状态…</p>
             </fieldset>
-            <div class="geo-sampling-options">
-              <div class="field">
-                <label for="geo-sample-count">每个平台采样次数</label>
-                <select id="geo-sample-count" name="sampleCount">
-                  <option value="1">1 次</option><option value="3">3 次</option><option value="5">5 次</option>
-                </select>
-              </div>
-              <div>
-                <label class="check"><input type="checkbox" name="webSearch" id="geo-web-search" disabled> 对支持的平台启用联网</label>
-                <p class="hint" id="geo-search-hint">勾选支持联网的平台后可启用。</p>
-              </div>
-            </div>
-            <p id="geo-request-count" class="hint" role="status"></p>
+
             <div class="form-footer">
               <div>
                 <div class="platform-selection" role="status" aria-atomic="true">
@@ -256,7 +244,7 @@
               <input id="website" name="url" type="url" maxlength="2048" placeholder="https://example.com/" required>
             </div>
             <label class="check"><input name="authorized" type="checkbox" required> 我有权审计这个网站</label>
-            <p class="hint">单次最多抓取 100 个网址，每秒最多 2 个请求。</p>
+            <p class="hint">输入你的网站首页。还没有自己的站点，可以先查看样例。</p>
             <div class="form-footer">
               <button type="button" id="demo" class="button quiet">试跑样例</button>
               <button type="submit" class="button primary">开始审计 <span aria-hidden="true">→</span></button>
@@ -270,8 +258,8 @@
             </div>
             <ol class="workflow-steps" role="list">
               <li><div><strong>填写网址</strong><p>输入站点入口，确认你有权审计。</p></div></li>
-              <li><div><strong>抓取分析</strong><p>从入口发现站内页面，分析链接与页面信息。</p></div></li>
-              <li><div><strong>查看报告</strong><p>在历史记录下载报告，查看问题和对应页面。</p></div></li>
+              <li><div><strong>开始检查</strong><p>系统自动查看站内页面和链接。</p></div></li>
+              <li><div><strong>处理问题</strong><p>打开报告，按建议修复优先级最高的问题。</p></div></li>
             </ol>
           </section>
           <section class="panel side-panel audit-guide" aria-labelledby="audit-guide">
@@ -289,20 +277,22 @@
       </section>
       <section id="history-view" aria-labelledby="history-title" hidden>
         <div class="page-heading with-action">
-          <div><h1 id="history-title">历史记录</h1><p>查看 GEO 检测结果、SEO 报告和文章优化报告。</p></div>
-          <a class="button quiet" href="#optimize">文章优化报告 ↗</a>
+          <div><h1 id="history-title">历史记录</h1><p id="history-description">回看 AI 曝光和网站检查的结果，找到接下来可以做的事。</p></div>
+          <a id="history-article" class="button quiet" href="#optimize">文章优化报告 ↗</a>
+          <a id="history-back" class="button quiet" href="#history" hidden>返回历史记录</a>
         </div>
-        <div class="workspace-grid history-grid">
+        <div id="history-overview" class="workspace-grid history-grid">
           <section class="panel history-panel" aria-labelledby="geo-history-title">
-            <div class="panel-heading"><h2 id="geo-history-title">GEO 检测</h2><a class="text-link" href="#article">新建检测 →</a></div>
-            <section id="geo-result" class="result" aria-live="polite" hidden></section>
-            <ul id="geo-history" class="history-list" aria-label="GEO 检测记录"><li class="empty">正在读取记录…</li></ul>
+            <div class="panel-heading"><h2 id="geo-history-title">AI 曝光</h2><a class="text-link" href="#article">新建检测 →</a></div>
+            <ul id="geo-history" class="history-list" aria-label="AI 曝光记录"><li class="empty">正在读取记录…</li></ul>
           </section>
           <section class="panel history-panel" aria-labelledby="seo-history-title">
-            <div class="panel-heading"><h2 id="seo-history-title">SEO 报告</h2><a class="text-link" href="#seo">新建审计 →</a></div>
-            <ul id="reports" class="history-list" aria-label="SEO 审计报告"><li class="empty">正在读取报告…</li></ul>
+            <div class="panel-heading"><h2 id="seo-history-title">网站检查</h2><a class="text-link" href="#seo">检查网站 →</a></div>
+            <ul id="reports" class="history-list" aria-label="网站检查记录"><li class="empty">正在读取报告…</li></ul>
           </section>
         </div>
+        <section id="geo-result" class="panel history-detail" aria-live="polite" hidden></section>
+        <section id="seo-result" class="panel history-detail" aria-live="polite" hidden></section>
       </section>
       <section id="billing-view" aria-labelledby="billing-title" hidden>
         <div class="page-heading">

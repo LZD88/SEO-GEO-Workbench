@@ -159,10 +159,7 @@ export function setupOverview(api) {
       $("platform-count").textContent = ready + " / " + platforms.length;
       $("coverage-fill").style.width = (platforms.length ? ready * 100 / platforms.length : 0) + "%";
       $("overview-platforms").replaceChildren(...platforms.map((item) => {
-        const capability = item.search ? "支持联网" : "普通对话";
-        const detail = item.lastSuccessAt ? capability + " · 最近成功 " + new Date(item.lastSuccessAt).toLocaleString("zh-CN")
-          : item.ready ? capability + " · 本次启动后暂无成功记录" : "";
-        const row = recentRow(item.label, detail, item.ready ? "已配置" : "未配置", item.ready ? "ready" : "");
+        const row = recentRow(item.label, "", item.ready ? "可用" : "暂不可用", item.ready ? "ready" : "");
         const icon = node("img");
         icon.alt = "";
         icon.src = "/platform-icons/" + item.id + (["gpt", "gemini"].includes(item.id) ? ".svg" : ".png");

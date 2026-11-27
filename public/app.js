@@ -12,8 +12,7 @@ const geoSubmit = geoForm.querySelector("[type=submit]");
 const platformList = $("#platforms");
 const selectionCount = $("#selection-count");
 const selectedPlatforms = $("#selected-platforms");
-const geoSampleCount = $("#geo-sample-count");
-const geoWebSearch = $("#geo-web-search");
+
 const platformHint = $("#platform-hint");
 const question = $("#geo-question");
 const crawlForm = $("#crawl-form");
@@ -21,6 +20,7 @@ const crawlStatus = $("#crawl-status");
 const crawlSubmit = crawlForm.querySelector("[type=submit]");
 const demoButton = $("#demo");
 const resultBox = $("#geo-result");
+const seoResultBox = $("#seo-result");
 const reportList = $("#reports");
 const geoHistory = $("#geo-history");
 const geoRecent = $("#geo-recent");
@@ -45,7 +45,9 @@ let renderedReports;
 let historyLoad = 0;
 let resultLoad = 0;
 let selectedCheckId;
+let selectedSeoId;
 let selectedState;
+let choseDefaultPlatform = false;
 let geoSubmitting = false;
 let platformsReady = false;
 let renderedPlatforms;
@@ -123,12 +125,21 @@ function updateMode(next) {
 function route() {
   const next = location.hash.slice(1);
   const checkLink = /^history\/([a-f0-9-]{36}|[a-f0-9]{64})$/.exec(next);
+  const seoLink = /^history\/seo\/([a-f0-9-]{36})$/.exec(next);
   const reportLink = /^optimize\/([a-f0-9-]{36})$/.exec(next);
-  view = checkLink ? "history" : reportLink ? "optimize" : Object.hasOwn(pageTitles, next) ? next : "overview";
+  view = checkLink || seoLink ? "history" : reportLink ? "optimize" : Object.hasOwn(pageTitles, next) ? next : "overview";
   selectedCheckId = checkLink?.[1];
+  selectedSeoId = seoLink?.[1];
   selectedState = undefined;
   resultLoad++;
   resultBox.hidden = !selectedCheckId;
+  seoResultBox.hidden = !selectedSeoId;
+  const resultOpen = Boolean(selectedCheckId || selectedSeoId);
+  $("#history-overview").hidden = resultOpen;
+  $("#history-article").hidden = resultOpen;
+  $("#history-back").hidden = !resultOpen;
+  $("#history-title").textContent = selectedSeoId ? "网站检查报告" : selectedCheckId ? "AI 曝光结果" : "历史记录";
+  $("#history-description").hidden = resultOpen;
   const isGeo = view === "article" || view === "brand";
   const isBilling = view === "billing" || view === "recharge";
   $("#geo-view").hidden = !isGeo;
@@ -154,6 +165,7 @@ function route() {
   if (view === "overview") void overview.refresh(true);
   if (isGeo || view === "history") void loadHistory();
   if (selectedCheckId) void showResult(selectedCheckId);
+  if (selectedSeoId) void showSeoResult(selectedSeoId);
   if (view === "optimize") void articleAgent.open(reportLink?.[1]);
   window.scrollTo(0, 0);
 }
@@ -190,34 +202,30 @@ function renderPlatformSelection() {
   });
   selectionCount.textContent = checked.length ? "已选 " + checked.length + " 个平台" : "未选择平台";
   selectedPlatforms.replaceChildren(...avatars);
-  const searchable = checked.filter((input) => input.dataset.search === "true").length;
-  geoWebSearch.disabled = !searchable;
-  if (!searchable) geoWebSearch.checked = false;
-  $("#geo-search-hint").textContent = searchable
-    ? (searchable < checked.length ? "其他已选平台仍走普通对话。" : "启用后会请求平台执行搜索。")
-    : "勾选支持联网的平台后可启用。";
-  const count = Number(geoSampleCount.value);
-  $("#geo-request-count").textContent = checked.length
-    ? "预计发起 " + checked.length * count + " 次模型请求" + (geoWebSearch.checked ? "，其中 " + searchable * count + " 次请求联网。" : "。")
-    : "";
+
   if (checked.length && geoMessage.textContent === selectPlatformMessage) message(geoMessage, "");
 }
 
 platformList.addEventListener("change", renderPlatformSelection);
-geoSampleCount.addEventListener("change", renderPlatformSelection);
-geoWebSearch.addEventListener("change", renderPlatformSelection);
+
 
 function drawPlatforms(platforms) {
-  const stamp = JSON.stringify(platforms.map(({ id, label, ready, search }) => [id, label, ready, search]));
+  const stamp = JSON.stringify(platforms.map(({ id, label, ready }) => [id, label, ready]));
   if (stamp !== renderedPlatforms) {
     const checked = new Set(new FormData(geoForm).getAll("platforms"));
-    platformList.replaceChildren(...platforms.map(({ id, label, ready, search }) => {
+    if (!choseDefaultPlatform) {
+      const first = platforms.find(({ id, ready }) => ready && id === "gpt") || platforms.find(({ ready }) => ready);
+      if (first) {
+        checked.add(first.id);
+        choseDefaultPlatform = true;
+      }
+    }
+    platformList.replaceChildren(...platforms.map(({ id, label, ready }) => {
       const card = element("label", "", "platform");
       const input = document.createElement("input");
       input.type = "checkbox";
       input.name = "platforms";
       input.value = id;
-      input.dataset.search = String(search);
       input.disabled = !ready;
       input.checked = ready && checked.has(id);
       const icon = document.createElement("img");
@@ -228,7 +236,7 @@ function drawPlatforms(platforms) {
       iconBox.append(icon);
       const caption = element("span", "");
       caption.append(element("span", label, "platform-name"),
-        element("small", !ready ? "未配置" : search ? "支持联网" : "普通对话"));
+        element("small", ready ? "可用" : "暂不可用"));
       card.append(iconBox, caption, input);
       return card;
     }));
@@ -239,7 +247,7 @@ function drawPlatforms(platforms) {
   platformsReady = available > 0;
   syncGeoSubmit();
   platformHint.textContent = available
-    ? "可多选。每个所选平台会收到同一个检测问题。"
+    ? "已为你选好一个可用平台，也可以多选。"
     : "当前没有可用平台，请联系管理员。";
   return available;
 }
@@ -254,8 +262,7 @@ geoForm.addEventListener("submit", async (event) => {
     message(geoMessage, selectPlatformMessage, true);
     return;
   }
-  const payload = { kind, name: data.get("name"), url: data.get("url"), question: data.get("question"), platforms,
-    sampleCount: Number(data.get("sampleCount")), webSearch: data.has("webSearch") };
+  const payload = { kind, name: data.get("name"), url: data.get("url"), question: data.get("question"), platforms };
   geoSubmitting = true;
   syncGeoSubmit();
   message(geoMessage, "正在提交检测…");
@@ -309,14 +316,9 @@ async function loadHistory() {
     if (!items.length) return empty(geoHistory, "暂无 GEO 检测记录。");
     geoHistory.replaceChildren(...items.map((check) => {
       const row = document.createElement("li");
-      const title = element("span", (check.kind === "article" ? "文章 · " : "品牌 · ") + check.name, "row-title");
-      const actions = element("div", "", "row-actions");
-      const result = element("button", "查看检测结果", "text-link");
-      result.type = "button";
-      result.addEventListener("click", () => openGeoResult(check.id));
-      actions.append(result);
-      row.append(title, element("span", [check.url, dates(check.createdAt), geoLabels[check.state], check.baselineId && (check.comparisonMode === "retry" ? "补跑" : "复测")].filter(Boolean).join(" · "), "row-meta"),
-        element("span", check.question, "row-meta"), actions);
+      const summary = historySummary(check.name, check.kind === "article" ? "文章" : "品牌", check.createdAt,
+        geoLabels[check.state] || "已记录", check.state === "completed" ? "ok" : check.state === "failed" ? "error" : "");
+      row.append(summary, link(check.state === "running" ? "查看进度 →" : "查看结果 →", "#history/" + check.id));
       return row;
     }));
   } catch {
@@ -327,114 +329,91 @@ async function loadHistory() {
   }
 }
 
-const evidenceLabels = {
-  pending: "检测中", failed: "调用失败", mentioned: "提及品牌", citation: "平台引用原文", "text-link": "正文含原文链接",
-};
-
-function evidenceLabel(sample, kind) {
-  return evidenceLabels[sample.evidence] || (kind === "brand" ? "未提及品牌" : "未发现原文链接");
-}
-
-function searchLabel(sample) {
-  if (sample.usedSearch === true) return "实际已联网";
-  if (sample.searchRequested === true) {
-    return sample.pending || sample.error ? "请求联网 · 无执行结果" : "请求联网 · 未确认执行";
-  }
-  return sample.usedSearch === false ? "未使用联网" : "联网状态未知";
-}
-
-function sampleDetail(sample, kind) {
-  const row = document.createElement("li");
-  const badge = element("span", evidenceLabel(sample, kind), "evidence-badge");
-  badge.dataset.evidence = sample.evidence || "miss";
-  const model = sample.modelVersion ? "实际模型 " + sample.modelVersion : "实际模型未知";
-  row.append(element("strong", "样本 " + (sample.number ?? 1)), badge, element("p",
-    [searchLabel(sample), sample.configuredModel && "配置 " + sample.configuredModel, model,
-      sample.retained && "沿用原结果", sample.measuredAt && dates(sample.measuredAt)].filter(Boolean).join(" · "), "hint"));
-  if (sample.error) row.append(element("p", sample.error, "error"));
-  if (sample.answer || sample.sources?.length) {
-    const details = document.createElement("details");
-    details.append(element("summary", "查看回答与来源"));
-    if (sample.answer) details.append(element("p", sample.answer, "answer-text"));
-    if (sample.sources?.length) {
-      const sources = document.createElement("ul");
-      for (const source of sample.sources) {
-        const item = document.createElement("li");
-        const url = link(source.url, source.url);
-        url.target = "_blank";
-        url.rel = "noopener noreferrer";
-        item.append(document.createTextNode(source.type === "text" ? "正文链接 · " : "平台引用 · "), url);
-        sources.append(item);
-      }
-      details.append(sources);
-    }
-    row.append(details);
-  }
-  return row;
-}
-
-function evidenceSummary(samples, kind, showRatio = false) {
-  const successful = samples.filter((sample) => !sample.pending && !sample.error);
-  const ratio = (count) => showRatio ? (successful.length ? count + "/" + successful.length : "—") : String(count);
-  const count = (evidence) => ratio(successful.filter((sample) => sample.evidence === evidence).length);
-  return [
-    showRatio ? "成功 " + successful.length + "/" + samples.length : successful.length + " / " + samples.length + " 个成功样本",
-    ...(kind === "brand" ? ["品牌提及 " + count("mentioned")] : ["平台引用 " + count("citation"), "仅正文链接 " + count("text-link")]),
-    "未命中 " + count("miss"),
-    ...(showRatio ? ["实际联网 " + ratio(successful.filter((sample) => sample.usedSearch === true).length)] : []),
-    "失败 " + samples.filter((sample) => sample.error).length,
-  ].join(" · ");
+function historySummary(name, type, timestamp, label, tone) {
+  const content = element("div", "", "history-record");
+  const main = element("div", "", "history-record-main");
+  main.append(element("span", name, "row-title"), element("span", type + " · " + dates(timestamp), "row-meta"));
+  const badge = element("span", label, "history-status");
+  if (tone) badge.dataset.tone = tone;
+  content.append(main, badge);
+  return content;
 }
 
 function groupSamples(samples) {
   return Object.values(Object.groupBy(samples, (sample) => sample.platformId || sample.model));
 }
 
+function platformOutcome(samples, kind) {
+  const good = samples.filter((sample) => !sample.pending && !sample.error);
+  if (!good.length) return samples.some((sample) => sample.pending) ? "等待结果" : "暂未返回结果";
+  if (kind === "brand") return good.some((sample) => sample.mentioned) ? "提到了品牌" : "本次未提到品牌";
+  if (good.some((sample) => sample.cited)) return "引用了文章";
+  return good.some((sample) => sample.textMatch) ? "回答里有文章链接" : "本次未引用文章";
+}
+
 function platformEvidence(samples, kind) {
-  const group = element("section", "", "geo-platform-evidence");
-  const rows = element("ul", "", "geo-samples");
-  rows.append(...samples.map((sample) => sampleDetail(sample, kind)));
-  group.append(element("h4", samples[0].model), element("p", evidenceSummary(samples, kind, true), "hint"), rows);
-  return group;
+  const answers = samples.filter((sample) => sample.answer || sample.sources?.length);
+  const outcome = platformOutcome(samples, kind);
+  const panel = element(answers.length ? "details" : "div", "", "simple-evidence");
+  const caption = element(answers.length ? "summary" : "p", "", "simple-evidence-title");
+  caption.append(element("strong", samples[0].model), element("span", outcome, "hint"));
+  panel.append(caption);
+  for (const { answer, sources } of answers) {
+    if (answer) panel.append(element("p", answer, "answer-text"));
+    if (!sources?.length) continue;
+    const list = element("ul", "", "plain-sources");
+    for (const source of sources) {
+      let url;
+      try { url = new URL(source.url); } catch { continue; }
+      if (!["https:", "http:"].includes(url.protocol)) continue;
+      const item = element("li", "");
+      const target = link(url.hostname, url.href);
+      target.target = "_blank";
+      target.rel = "noreferrer";
+      item.append(document.createTextNode(source.type === "text" ? "回答中的链接 " : "引用来源 "), target);
+      list.append(item);
+    }
+    if (list.children.length) panel.append(list);
+  }
+  return panel;
+}
+
+function geoOverview(check) {
+  const groups = groupSamples(check.samples);
+  const returned = groups.filter((group) => group.some((item) => !item.pending && !item.error)).length;
+  const hits = groups.filter((group) => group.some((item) => !item.pending && !item.error &&
+    (check.kind === "article" ? item.cited : item.mentioned))).length;
+  if (check.state === "running") return "正在等 AI 回答，你可以稍后回来查看。";
+  if (!returned) return "这次暂未拿到回答，可以稍后再试。";
+  const result = !hits
+    ? (check.kind === "article" ? "这次未发现正式引用。" : "这次未发现品牌提及。")
+    : (check.kind === "article" ? hits + " 个平台引用了这篇文章。" : hits + " 个平台提到了这个品牌。");
+  return result + " 共收到 " + returned + " 个平台的回答。";
 }
 
 function geoComparison(before, after) {
   const section = element("section", "", "geo-comparison");
-  const retry = after.comparisonMode === "retry";
-  const title = element("h4", retry ? "补跑对照" : "复测对照");
-  const note = after.comparisonMode === "legacy"
-    ? "基线缺少模型与联网配置快照。本次使用当前配置。"
-    : retry ? "本次仅补跑失败样本，成功样本沿用原记录。"
-    : "本次沿用了基线的问题、采样次数和请求配置。模型回答可能波动。";
+  const comparisonNote = after.comparisonMode === "legacy" ? "旧结果的检测条件不完整，两次结果仅供参考。"
+    : after.conditionsChanged ? "两次检测时的 AI 版本不同，结果仅供参考。"
+    : "同一个问题的回答也可能变化，建议结合原回答看。";
+  section.append(element("h4", "前后结果"), element("p", comparisonNote, "hint"));
   const sides = element("div", "", "geo-comparison-grid");
-  for (const [label, run] of [["基线", before], ["本次", after]]) {
+  for (const [label, run] of [["上次", before], ["这次", after]]) {
     const side = element("div", "", "geo-comparison-side");
-    const heading = label === "基线" ? link(label + " ↗", "#history/" + run.id) : element("strong", label);
-    const list = element("ul", "", "geo-comparison-samples");
-    for (const samples of groupSamples(run.samples)) {
-      list.append(element("li", samples[0].model + " · " + evidenceSummary(samples, run.kind, true)));
-    }
-    side.append(heading, element("p", dates(run.measuredAt || run.createdAt), "hint"),
-      element("p", evidenceSummary(run.samples, run.kind), "hint"), list);
+    const heading = label === "上次" ? link(label + "结果 ↗", "#history/" + run.id) : element("strong", label + "结果");
+    side.append(heading, element("p", geoOverview(run), "hint"));
     sides.append(side);
   }
-  section.append(title, element("p", note, "hint"), sides);
-  const differs = after.samples.some((sample) => {
-    const previous = before.samples.find((item) => item.platformId === sample.platformId && (item.number ?? 1) === (sample.number ?? 1));
-    return previous?.modelVersion && sample.modelVersion && previous.modelVersion !== sample.modelVersion;
-  });
-  if (differs) section.append(element("p", "上游返回的实际模型版本有变化，比较时请考虑版本差异。", "notice"));
+  section.append(sides);
   return section;
 }
 
 function retestAction(check) {
   const controls = element("div", "", "geo-retest");
   const legacy = check.retestMode === "legacy";
-  const button = element("button", legacy ? "按当前配置复测" : "同题复测", "button quiet");
-  const failureCount = check.samples.filter((sample) => sample.error).length;
-  const retry = check.canRetry ? element("button", "只补跑失败样本 (" + failureCount + ")", "button quiet") : null;
-  const status = element("p", legacy ? "旧记录没有模型和联网配置快照，复测使用当前配置。"
-    : "完整复测将发起 " + check.samples.length + " 次请求。", "hint");
+  const button = element("button", "再测一次", "button quiet");
+  const retry = check.canRetry ? element("button", "重试未返回的平台", "button quiet") : null;
+  const status = element("p", legacy ? "这条旧记录将使用当前的检测方式。" : "", "hint");
   status.setAttribute("role", "status");
   async function submit(failedOnly) {
     button.disabled = true;
@@ -465,7 +444,7 @@ function retestAction(check) {
 function renderGeoAdvice(kind, successful, hits, hasFailures) {
   const advice = [];
   if (!successful.length) {
-    advice.push(["先拿到可用样本", "查看上方的平台报错，换一个可用平台发起检测，或等出错的平台恢复后重试。拿到回答后再判断内容是否需要优化。"]);
+    advice.push(["稍后再试", "可以换一个 AI 平台，或等服务恢复后再检测。"]);
   } else if (kind === "article") {
     if (hits.length) {
       advice.push(["保留已被引用的原文入口", "保留被引用的网址，及时更新对应段落。用相同的问题和平台复测，观察引用是否持续。"]);
@@ -475,9 +454,6 @@ function renderGeoAdvice(kind, successful, hits, hasFailures) {
       advice.push(["让原文直接回答检测问题", "在文章开头给出一段可独立理解的答案，再用贴合问题的小标题组织步骤、示例和来源。发布后用相同问题复测。"]);
     }
 
-    if (!successful.some((sample) => sample.usedSearch)) {
-      advice.push(["补测联网引用", "本次成功样本均未记录联网搜索。用支持联网的平台补测，观察平台是否会主动找到并引用原文。"]);
-    }
   } else if (hits.length) {
     advice.push(["核对品牌被推荐的理由", "展开回答，检查品牌描述和适用场景是否准确。把需要澄清的事实补到官网，并用相同问题复测。"]);
   } else {
@@ -485,11 +461,11 @@ function renderGeoAdvice(kind, successful, hits, hasFailures) {
   }
 
   if (successful.length && hasFailures) {
-    advice.push(["补齐失败平台的样本", "等出错的平台恢复后单独补测，保持检测问题和目标一致，再比较各平台的结果。"]);
+    advice.push(["重试未返回的平台", "点击下方的重试按钮，可以补齐没拿到的回答。"]);
   }
 
   const section = element("section", "", "geo-advice");
-  const title = element("h4", "GEO 优化建议");
+  const title = element("h4", "接下来可以做什么");
   title.id = "geo-advice-title";
   section.setAttribute("aria-labelledby", title.id);
   const list = document.createElement("ol");
@@ -520,23 +496,21 @@ async function showResult(id, updating = false) {
     }
     const successful = samples.filter((sample) => !sample.pending && !sample.error);
     const hits = successful.filter((sample) => check.kind === "article" ? sample.cited : sample.mentioned);
-    const details = element("p", state === "running"
-      ? "检测中 · " + samples.filter((sample) => !sample.pending).length + " / " + samples.length + " 个样本已返回"
-      : evidenceSummary(samples, check.kind));
-    const note = measuredAt ? "最近一次 · " + dates(measuredAt) : "";
+    const details = element("p", geoOverview(check), "history-takeaway");
+    const note = measuredAt ? dates(measuredAt) : "";
     resultBox.replaceChildren(headline, details, element("p", note, "hint"));
-    resultBox.append(...groupSamples(samples).map((group) => platformEvidence(group, check.kind)));
-    if (check.retestMode) resultBox.append(retestAction(check));
     if (state !== "running") {
       const advice = renderGeoAdvice(check.kind, successful, hits, samples.some((sample) => sample.error));
       if (check.kind === "article") {
-        const action = element("button", "带入文章优化 Agent →", "text-link advice-action");
+        const action = element("button", "帮我优化这篇文章 →", "text-link advice-action");
         action.type = "button";
         action.addEventListener("click", () => articleAgent.attach(check));
         advice.append(action);
       }
       resultBox.append(advice);
     }
+    resultBox.append(...groupSamples(samples).map((group) => platformEvidence(group, check.kind)));
+    if (check.retestMode) resultBox.append(retestAction(check));
     if (check.baselineId && state !== "running") {
       let comparison;
       try { comparison = geoComparison(await api("/api/geo-checks/" + check.baselineId), check); }
@@ -559,16 +533,48 @@ function drawReports(jobs) {
   if (!jobs.length) return empty(reportList, "暂无 SEO 报告。");
   reportList.replaceChildren(...jobs.map((job) => {
     const row = document.createElement("li");
-    const actions = element("div", "", "row-actions");
-    for (const [type, text] of [["html", "HTML 报告"], ["json", "JSON 数据"], ["log", "运行日志"]]) {
-      if (job.files.includes(type)) actions.append(link(text, "/api/reports/" + job.id + "/" + type));
-    }
-    row.append(element("span", job.demo ? "本地样例" : job.url, "row-title"),
-      element("span", dates(job.createdAt) + " · " + labels[job.status], "row-meta"));
-    if (actions.children.length) row.append(actions);
-    if (job.error) row.append(element("p", job.error, "notice error"));
+    const title = job.demo ? "网站检查样例" : new URL(job.url).hostname;
+    row.append(historySummary(title, "网站检查", job.createdAt, labels[job.status] || "已记录",
+      job.status === "done" ? "ok" : job.status === "error" ? "error" : ""));
+    if (job.reportReady) row.append(link("查看报告 →", "#history/seo/" + job.id));
+    if (job.status === "error") row.append(link("重新检查 →", "#seo"));
     return row;
   }));
+}
+
+async function showSeoResult(id) {
+  seoResultBox.replaceChildren(element("p", "正在读取报告…"));
+  try {
+    const { demo, url, pages, findings, createdAt } = await api("/api/seo-reports/" + id);
+    if (selectedSeoId !== id) return;
+    const page = element("h3", demo ? "网站检查样例" : new URL(url).hostname);
+    const summary = findings.length ? "建议先处理下面的问题。" : "这次检查没有发现需要列出的常见问题。";
+    const subtitle = (pages === null ? "" : "检查了 " + pages + " 个网址。") + summary;
+    seoResultBox.replaceChildren(page, element("p", subtitle, "history-takeaway"), element("p", dates(createdAt), "hint"));
+    for (const finding of findings) {
+      const section = element("section", "", "seo-finding");
+      const badge = element("span", finding.priority === "repair" ? "优先处理" : "可以改进", "history-status");
+      badge.dataset.tone = finding.priority === "repair" ? "error" : "ok";
+      const caption = element("div", "", "simple-evidence-title");
+      caption.append(element("h4", finding.title + "（" + finding.count + "）"), badge);
+      section.append(caption, element("p", finding.next, "hint"));
+      if (finding.examples.length) {
+        const details = element("details", "", "seo-examples");
+        const list = element("ul", "", "plain-sources");
+        for (const example of finding.examples) {
+          const row = element("li", [example.target, example.occurrences && "出现 " + example.occurrences + " 次",
+            example.from && "来源 " + example.from, example.destination && "跳转到 " + example.destination].filter(Boolean).join(" · "));
+          list.append(row);
+        }
+        details.append(element("summary", "查看涉及的页面"), list);
+        section.append(details);
+      }
+      seoResultBox.append(section);
+    }
+    seoResultBox.append(link("再检查一个网站 →", "#seo"));
+  } catch (error) {
+    if (selectedSeoId === id) seoResultBox.replaceChildren(element("p", error.message, "error"));
+  }
 }
 
 async function refresh() {
@@ -583,7 +589,15 @@ async function refresh() {
     $("#geo-service").dataset.state = available ? "ready" : "offline";
     $("#service-text").textContent = available ? "已配置 " + available + " 个 AI 平台" : "暂无可用 AI 平台";
     const selected = jobs.find((job) => job.id === lastJobId);
-    if (selected) message(crawlStatus, selected.error || labels[selected.status], selected.status === "error");
+    if (selected) {
+      if (selected.reportReady) {
+        const href = "#history/seo/" + selected.id;
+        if (!crawlStatus.querySelector("a")) crawlStatus.replaceChildren(link("检查完成，查看报告 →", href));
+        crawlStatus.classList.remove("error");
+      } else {
+        message(crawlStatus, selected.status === "error" ? "这次检查未完成，请稍后重试。" : labels[selected.status], selected.status === "error");
+      }
+    }
     drawReports(jobs);
     if (selectedCheckId && selectedState === "running") await showResult(selectedCheckId, true);
   } catch {
