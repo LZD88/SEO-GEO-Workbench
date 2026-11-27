@@ -37,10 +37,14 @@ function heatmap(rows, max) {
     view.append(gap);
   }
   for (const { key, total } of rows) {
-    const day = node("span", key.endsWith("-01") ? key.slice(5).replace("-", "/") : String(Number(key.slice(-2))), "heat-cell");
+    const label = key === rows[0].key || key.endsWith("-01")
+      ? Number(key.slice(5, 7)) + "/" + Number(key.slice(-2))
+      : String(Number(key.slice(-2)));
+    const day = node("span", label, "heat-cell");
     day.dataset.level = total ? String(Math.ceil(total * 4 / max)) : "0";
     day.title = key + " · " + total + " 次检测";
     day.setAttribute("aria-label", day.title);
+    if (key === rows.at(-1).key) day.setAttribute("aria-current", "date");
     view.append(day);
   }
   return view;
@@ -151,9 +155,14 @@ export function setupOverview(api) {
       const stamp = JSON.stringify(platforms);
       if (stamp === platformStamp) return;
       platformStamp = stamp;
-      $("platform-count").textContent = platforms.filter((item) => item.ready).length + " / " + platforms.length;
+      const ready = platforms.filter((item) => item.ready).length;
+      $("platform-count").textContent = ready + " / " + platforms.length;
+      $("coverage-fill").style.width = (platforms.length ? ready * 100 / platforms.length : 0) + "%";
       $("overview-platforms").replaceChildren(...platforms.map((item) => {
-        const row = recentRow(item.label, "", item.ready ? "可用" : "暂不可用", item.ready ? "ready" : "");
+        const capability = item.search ? "支持联网" : "普通对话";
+        const detail = item.lastSuccessAt ? capability + " · 最近成功 " + new Date(item.lastSuccessAt).toLocaleString("zh-CN")
+          : item.ready ? capability + " · 本次启动后暂无成功记录" : "";
+        const row = recentRow(item.label, detail, item.ready ? "已配置" : "未配置", item.ready ? "ready" : "");
         const icon = node("img");
         icon.alt = "";
         icon.src = "/platform-icons/" + item.id + (["gpt", "gemini"].includes(item.id) ? ".svg" : ".png");

@@ -7,6 +7,9 @@ import { isIP } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
+import { articleBodyLimit, createArticleOptimizer } from "./article-optimization.mjs";
+import { readArticle } from "./article-reader.mjs";
+import { articleReportMarkdown, articleReportPath, createArticleReports } from "./article-reports.mjs";
 import { createGeoChecks, GeoError } from "./geo-checks.mjs";
 import { createGeoPlatforms } from "./geo-platforms.mjs";
 import { localAuth } from "./local-auth.mjs";
@@ -25,6 +28,8 @@ const geoChecks = createGeoChecks({
   legacyDataDir: join(root, "data", "geo"),
   platforms: geoPlatforms,
 });
+const optimizeArticle = createArticleOptimizer(geoChecks, geoPlatforms);
+const articleReports = createArticleReports(join(root, "data", "article-reports"));
 const files = { html: "report.html", json: "report.json", log: "crawl.log" };
 const staticFiles = new Map([
   ...["/", "/home", "/login"].map((path) => [path, ["public/home.html", "text/html; charset=utf-8"]]),
@@ -35,6 +40,7 @@ const staticFiles = new Map([
   ["/overview.js", ["public/overview.js", "text/javascript; charset=utf-8"]],
   ["/style.css", ["public/style.css", "text/css; charset=utf-8"]],
   ["/app.js", ["public/app.js", "text/javascript; charset=utf-8"]],
+  ["/article-agent.js", ["public/article-agent.js", "text/javascript; charset=utf-8"]],
   ...Object.entries({ gpt: "openai", gemini: "gemini-color" })
     .map(([id, name]) => ["/platform-icons/" + id + ".svg", ["vendor/niubigeo/assets/providers/" + name + ".svg", "image/svg+xml"]]),
   ...["doubao", "qwen", "deepseek", "wenxin"]
@@ -61,14 +67,14 @@ function validateWebsite(value) {
   return url.href;
 }
 
-async function input(req) {
+async function input(req, limit = 8192) {
   const type = (req.headers["content-type"] ?? "").split(";")[0];
   if (type !== "application/json") throw new Error("仅接受 JSON 请求。");
   const chunks = [];
   let bytes = 0;
   for await (const chunk of req) {
     bytes += chunk.length;
-    if (bytes > 8192) throw new Error("请求太大。");
+    if (bytes > limit) throw new Error("请求太大。");
     chunks.push(chunk);
   }
   const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -203,6 +209,39 @@ async function handle(req, res, binary) {
   if (path.startsWith("/api/") && !auth.signedIn(req)) {
     return json(res, 401, { error: "请先登录工作台。" });
   }
+  if (path === "/api/article-source" || path === "/api/article-optimization") {
+    if (req.method !== "POST") return json(res, 405, { error: "不支持此请求。" });
+    if (req.headers["sec-fetch-site"] === "cross-site" || (req.headers.origin && req.headers.origin !== origin)) {
+      return json(res, 403, { error: "来源不符。" });
+    }
+    const reading = path === "/api/article-source";
+    let payload;
+    try { payload = await input(req, reading ? 8192 : articleBodyLimit); }
+    catch { return json(res, 400, { error: "请求格式无效或正文太长。" }); }
+    try {
+      return json(res, 200, reading ? await readArticle(payload.url) : await articleReports.save(await optimizeArticle(payload)));
+    } catch (error) {
+      if (error instanceof GeoError) return json(res, error.status, { error: error.message });
+      throw error;
+    }
+  }
+  const articleReport = articleReportPath.exec(path);
+  if (path === "/api/article-reports" || articleReport) {
+    if (req.method !== "GET") return json(res, 405, { error: "不支持此请求。" });
+    if (!articleReport) return json(res, 200, await articleReports.list());
+    try {
+      const report = await articleReports.read(articleReport[1]);
+      if (!articleReport[2]) return json(res, 200, report);
+      res.writeHead(200, {
+        "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "no-store",
+        "Content-Disposition": 'attachment; filename="article-optimization-' + report.id.slice(0, 8) + '.md"',
+      });
+      return res.end(articleReportMarkdown(report));
+    } catch (error) {
+      if (error instanceof GeoError) return json(res, error.status, { error: error.message });
+      throw error;
+    }
+  }
   const geoResult = /^\/api\/geo-checks\/([a-f0-9]{64}|[a-f0-9-]{36})$/.exec(path);
   if (path === "/api/geo-checks" || geoResult) {
     try {
@@ -210,13 +249,16 @@ async function handle(req, res, binary) {
         return json(res, 200, geoResult ? await geoChecks.result(geoResult[1]) : await geoChecks.list());
       }
       if (req.method === "POST" && !geoResult) {
-        if (req.headers.origin && req.headers.origin !== origin) {
+        if (req.headers["sec-fetch-site"] === "cross-site" || (req.headers.origin && req.headers.origin !== origin)) {
           return json(res, 403, { error: "来源不符。" });
         }
         let payload;
         try { payload = await input(req); }
         catch { return json(res, 400, { error: "请求格式无效。" }); }
-        return json(res, 202, await geoChecks.create(payload));
+        const check = Object.hasOwn(payload, "baselineId")
+          ? await geoChecks.retest(payload.baselineId, payload.useCurrentConfiguration, payload.failedOnly === true)
+          : await geoChecks.create(payload);
+        return json(res, 202, check);
       }
       return json(res, 405, { error: "不支持此请求。" });
     } catch (error) {
@@ -282,7 +324,7 @@ async function handle(req, res, binary) {
   if (item) {
     const content = await readFile(join(root, item[0]));
     res.writeHead(200, { "Content-Type": item[1], "Cache-Control": "no-store",
-      "Content-Security-Policy": "default-src 'none'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" });
+      "Content-Security-Policy": "default-src 'none'; img-src 'self'" + (path === "/dashboard" ? " blob:" : "") + "; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" });
     return res.end(content);
   }
   if (demoPages.has(path)) {
