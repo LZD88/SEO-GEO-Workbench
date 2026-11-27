@@ -49,7 +49,6 @@ const staticFiles = new Map([
   ["/home.js", ["public/home.js", "text/javascript; charset=utf-8"]],
   ["/theme.js", ["public/theme.js", "text/javascript; charset=utf-8"]],
   ["/overview.js", ["public/overview.js", "text/javascript; charset=utf-8"]],
-  ["/ai-radar.js", ["public/ai-radar.js", "text/javascript; charset=utf-8"]],
   ["/style.css", ["public/style.css", "text/css; charset=utf-8"]],
   ["/app.js", ["public/app.js", "text/javascript; charset=utf-8"]],
   ["/article-agent.js", ["public/article-agent.js", "text/javascript; charset=utf-8"]],

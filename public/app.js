@@ -1,14 +1,13 @@
 import { initTheme } from "./theme.js";
 import { setupOverview } from "./overview.js";
-import { setupAiRadar } from "./ai-radar.js";
 import { setupArticleAgent } from "./article-agent.js";
 import { articleAdvice } from "./article-evidence.js";
 
 initTheme();
 const overview = setupOverview(api);
-const aiRadar = setupAiRadar(api);
 const articleAgent = setupArticleAgent(api);
 const $ = (selector) => document.querySelector(selector);
+const aiRadar = setupAiRadar(api);
 const geoForm = $("#geo-form");
 const geoMessage = $("#geo-message");
 const geoSubmit = geoForm.querySelector("[type=submit]");
@@ -91,6 +90,105 @@ function link(text, href) {
 
 function dates(timestamp) {
   return new Date(timestamp).toLocaleString("zh-CN", { hour12: false });
+}
+
+function radarExternalLink(text, href, className = "") {
+  const target = element("a", text, className);
+  target.href = href;
+  target.target = "_blank";
+  target.rel = "noreferrer";
+  return target;
+}
+
+function radarTime(value) {
+  if (!value) return "时间未标注";
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+}
+
+function radarEmpty(text) {
+  return element("p", text, "radar-empty");
+}
+
+function radarNewsCard(item) {
+  const card = element("article", "", "radar-card news-card");
+  const meta = element("div", "", "radar-meta");
+  meta.append(element("span", item.source, "radar-source"), element("time", radarTime(item.publishedAt)));
+  card.append(meta, radarExternalLink(item.title, item.url, "radar-title"));
+  if (item.summary) card.append(element("p", item.summary, "radar-summary"));
+  card.append(radarExternalLink("阅读原文 ↗", item.url, "text-link radar-action"));
+  return card;
+}
+
+function radarDiscussionRow(item) {
+  const row = element("li", "", "radar-discussion");
+  const copy = element("div");
+  copy.append(radarExternalLink(item.title, item.url, "radar-title"),
+    element("p", radarTime(item.publishedAt), "radar-summary"));
+  const activity = element("div", "", "radar-activity");
+  activity.append(element("strong", String(item.points)), element("span", "赞同"),
+    element("strong", String(item.comments)), element("span", "讨论"));
+  if (item.discussionUrl) activity.append(radarExternalLink("参与讨论 ↗", item.discussionUrl, "text-link"));
+  row.append(copy, activity);
+  return row;
+}
+
+function radarToolCard(item) {
+  const card = element("article", "", "radar-card tool-card");
+  const meta = element("div", "", "radar-meta");
+  meta.append(element("span", item.language || "开源工具", "radar-source"),
+    element("span", "★ " + item.stars.toLocaleString("zh-CN")));
+  card.append(meta, radarExternalLink(item.title, item.url, "radar-title"));
+  if (item.summary) card.append(element("p", item.summary, "radar-summary"));
+  card.append(element("small", item.source + " · 最近更新 " + radarTime(item.publishedAt)),
+    radarExternalLink("打开工具 ↗", item.url, "text-link radar-action"));
+  return card;
+}
+
+function setupAiRadar(client) {
+  const refreshButton = $("#radar-refresh");
+  const status = $("#radar-status");
+  const sources = $("#radar-sources");
+  const news = $("#radar-news");
+  const discussions = $("#radar-discussions");
+  const tools = $("#radar-tools");
+  let loading = false;
+  let loadedAt = 0;
+
+  async function refresh(force = false) {
+    if (loading || (!force && loadedAt && Date.now() - loadedAt < 10 * 60_000)) return;
+    loading = true;
+    refreshButton.disabled = true;
+    status.textContent = force ? "正在刷新全球 AI 动态…" : "正在汇总全球 AI 动态…";
+    status.classList.remove("error");
+    try {
+      const data = await client("/api/ai-radar" + (force ? "?refresh=1" : ""));
+      loadedAt = Date.now();
+      news.replaceChildren(...(data.news.length ? data.news.map(radarNewsCard) : [radarEmpty("暂时没有读取到最新资讯。")]));
+      discussions.replaceChildren(...(data.discussions.length
+        ? data.discussions.map(radarDiscussionRow) : [radarEmpty("暂时没有读取到社区热议。")]));
+      tools.replaceChildren(...(data.tools.length ? data.tools.map(radarToolCard) : [radarEmpty("暂时没有读取到工具榜。")]));
+      sources.replaceChildren(...data.sources.map((source) => {
+        const pill = element("span", source.label, "radar-source-pill");
+        pill.dataset.state = source.ok ? "ready" : source.stale ? "stale" : "offline";
+        pill.title = source.ok ? "已更新" : source.stale ? "当前连接失败，展示上次结果" : source.error || "暂不可用";
+        return pill;
+      }));
+      const ready = data.sources.filter((source) => source.ok).length;
+      status.textContent = radarTime(data.updatedAt) + " 更新 · " + ready + "/" + data.sources.length + " 个来源在线" +
+        (data.partial ? " · 个别来源暂不可用，其他内容仍可正常查看" : "");
+    } catch (error) {
+      status.textContent = error.message;
+      status.classList.add("error");
+    } finally {
+      loading = false;
+      refreshButton.disabled = false;
+    }
+  }
+
+  refreshButton.addEventListener("click", () => void refresh(true));
+  return { refresh };
 }
 
 function setCurrent(selector, enabled) {
