@@ -64,6 +64,7 @@ async function api(path, payload) {
     throw new Error("工作台暂时不可用，请稍后重试。");
   }
   const data = await response.json();
+  if (response.status === 503 && data.code === "maintenance") location.replace("/dashboard");
   if (!response.ok) throw new Error(data.error || "请求失败，请重试。");
   return data;
 }

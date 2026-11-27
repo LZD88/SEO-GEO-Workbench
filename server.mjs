@@ -15,7 +15,8 @@ import { articleReportMarkdown, articleReportPath, createArticleReports } from "
 import { createGeoChecks, GeoError } from "./geo-checks.mjs";
 import { createGeoPlatforms } from "./geo-platforms.mjs";
 import { localAuth } from "./local-auth.mjs";
-import { createLocalAdmin, localSeoLimits } from "./local-admin.mjs";
+import { createLocalAdmin } from "./local-admin.mjs";
+import { renderMaintenance } from "./local-maintenance.mjs";
 import { publicGeoResult, summarizeSeoReport } from "./evaluation-view.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
@@ -52,6 +53,7 @@ const staticFiles = new Map([
   ["/article-evidence.js", ["public/article-evidence.js", "text/javascript; charset=utf-8"]],
   ["/admin", ["public/admin.html", "text/html; charset=utf-8"]],
   ["/admin.css", ["public/admin.css", "text/css; charset=utf-8"]],
+  ["/admin-console.css", ["public/admin-console.css", "text/css; charset=utf-8"]],
   ["/admin.js", ["public/admin.js", "text/javascript; charset=utf-8"]],
   ...Object.entries({ gpt: "openai", gemini: "gemini-color" })
     .map(([id, name]) => ["/platform-icons/" + id + ".svg", ["vendor/niubigeo/assets/providers/" + name + ".svg", "image/svg+xml"]]),
@@ -62,7 +64,8 @@ const jobs = new Map();
 function recentSeoJobs() {
   return [...jobs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 30);
 }
-const admin = await createLocalAdmin({ dataDir, checks: geoChecks, platforms: geoPlatforms, seoJobs: recentSeoJobs, download: downloadRawSeo });
+const admin = await createLocalAdmin({ dataDir, checks: geoChecks, platforms: geoPlatforms,
+  seoJobs: recentSeoJobs, articleReports, download: downloadRawSeo });
 let pending = false;
 let crawler;
 
@@ -156,7 +159,7 @@ async function runCrawl(job, binary) {
       child.once("close", (code) => {
         clearTimeout(timer);
         crawler = undefined;
-        if (expired) reject(new Error("审计超过 3 分钟。请改用较小的入口页面。"));
+        if (expired) reject(new Error("审计超过 " + job.limits.timeout / 1000 + " 秒。请改用较小的入口页面。"));
         else resolve(code);
       });
     });
@@ -192,7 +195,7 @@ async function startCrawl(payload, binary) {
     demo: payload.demo === true,
     status: "running",
     createdAt: new Date().toISOString(),
-    limits: localSeoLimits,
+    limits: admin.seoLimits,
     files: [],
   };
   pending = true;
@@ -235,12 +238,27 @@ function publicSeoJob({ id, url, demo, status, createdAt, files }) {
   return { id, url, demo, status, createdAt, reportReady: status === "done" && files.includes("json") };
 }
 
+function maintenanceResponse(res) {
+  res.setHeader("Retry-After", "60");
+  return json(res, 503, { code: "maintenance", error: admin.maintenance.message });
+}
+
 async function handle(req, res, binary) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   if (req.headers.host !== host + ":" + port) return json(res, 421, { error: "请使用本机工作台地址。" });
   const requestUrl = new URL(req.url, origin);
   const path = requestUrl.pathname;
   if (path.startsWith("/api/admin/")) return admin.handle(req, res, path, input, json, origin);
+  if (admin.maintenance.enabled) {
+    if (path.startsWith("/api/") && path !== "/api/logout") return maintenanceResponse(res);
+    if (["/", "/home", "/login", "/dashboard"].includes(path) && ["GET", "HEAD"].includes(req.method)) {
+      res.writeHead(503, {
+        "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "60",
+        "Content-Security-Policy": "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+      });
+      return res.end(renderMaintenance(admin.maintenance.message));
+    }
+  }
   if (["/api/session", "/api/setup", "/api/login", "/api/logout"].includes(path)) {
     return auth.handle(req, res, path, input, json, origin);
   }
@@ -260,6 +278,7 @@ async function handle(req, res, binary) {
     let payload;
     try { payload = await input(req, reading ? 8192 : articleBodyLimit); }
     catch { return json(res, 400, { error: "请求格式无效或正文太长。" }); }
+    if (admin.maintenance.enabled) return maintenanceResponse(res);
     try {
       if (!reading) {
         const report = await articleReports.save(await optimizeArticle(payload));
@@ -326,6 +345,7 @@ async function handle(req, res, binary) {
         let payload;
         try { payload = await input(req); }
         catch { return json(res, 400, { error: "请求格式无效。" }); }
+        if (admin.maintenance.enabled) return maintenanceResponse(res);
         const check = Object.hasOwn(payload, "baselineId")
           ? await geoChecks.retest(payload.baselineId, payload.useCurrentConfiguration, payload.failedOnly === true)
           : await geoChecks.create({
@@ -346,6 +366,7 @@ async function handle(req, res, binary) {
     let payload;
     try { payload = await input(req); }
     catch { return json(res, 400, { error: "请求格式无效。" }); }
+    if (admin.maintenance.enabled) return maintenanceResponse(res);
     if (payload.demo !== true && payload.authorized === true) {
       try { validateWebsite(payload.url); }
       catch (error) { return json(res, 400, { error: error.message }); }

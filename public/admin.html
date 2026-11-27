@@ -3,61 +3,142 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#122d31">
   <title>曜见 YaoSight · 管理员后台</title>
-  <link rel="stylesheet" href="/admin.css">
+  <link rel="stylesheet" href="/admin-console.css">
   <script type="module" src="/admin.js"></script>
 </head>
-<body>
-  <header>
-    <a href="/admin" class="brand"><span class="brand-icon" aria-hidden="true">Y</span> 曜见 <small>YaoSight</small></a>
-    <div class="header-actions"><a href="/dashboard">返回工作台</a><button type="button" id="sign-out" hidden>退出</button></div>
-  </header>
-  <main>
-    <h1>管理员后台</h1>
-    <p id="message" role="status"></p>
-    <section id="sign-in" class="panel sign-in" hidden>
-      <h2>管理员登录</h2>
-      <p id="setup" hidden>请在项目目录运行 <code>powershell.exe -NoProfile -File .\setup-admin.ps1</code>，设置管理员密码后刷新页面。</p>
-      <form id="login">
+<body class="admin-body">
+  <section id="sign-in" class="login-shell" hidden>
+    <a href="/home" class="brand"><span class="brand-icon" aria-hidden="true">Y</span><span>曜见 <small>YaoSight</small></span></a>
+    <div class="panel">
+      <h1>管理员登录</h1>
+      <p id="login-message" class="notice" role="status"></p>
+      <p id="setup" class="muted" hidden>在项目目录运行 <code>powershell.exe -NoProfile -File .\setup-admin.ps1</code>，设置管理员密码后刷新页面。</p>
+      <form id="login" class="form-stack">
         <label for="password">管理员密码</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" minLength="8" maxlength="128" required>
-        <button class="primary" type="submit">登录</button>
+        <input id="password" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="128" required>
+        <button class="primary" type="submit">登录后台</button>
       </form>
-    </section>
-    <div id="console" hidden>
-      <div class="operations-heading"><p>评测策略、渠道状态与原始运行记录。</p><button id="refresh" type="button">刷新记录</button></div>
-      <div class="config-grid">
-        <section class="panel">
-          <h2>GEO 评测策略</h2>
-          <form id="settings">
-            <label for="samples">每平台采样次数</label>
-            <select id="samples" name="sampleCount"><option>1</option><option>3</option><option>5</option></select>
-            <label class="toggle"><input name="webSearch" type="checkbox"> 对支持的平台请求联网</label>
-            <p>设置在下一次新建检测时生效。同题复测使用原运行条件。</p>
-            <button type="submit" class="primary">保存策略</button>
-          </form>
-        </section>
-        <section class="panel">
-          <h2>SEO 抓取策略</h2>
-          <dl id="seo-limits"></dl>
-        </section>
-      </div>
-      <section class="panel">
-        <h2>模型渠道</h2>
-        <div class="table-scroll">
-          <table><thead><tr><th>平台</th><th>渠道</th><th>配置模型</th><th>可用性</th><th>能力</th><th>最近成功</th></tr></thead><tbody id="channels"></tbody></table>
-        </div>
-      </section>
-      <section class="panel">
-        <h2>GEO 运行记录</h2>
-        <ul id="geo" class="records"></ul>
-        <section id="diagnostic" hidden aria-live="polite"></section>
-      </section>
-      <section class="panel">
-        <h2>SEO 原始报告</h2>
-        <ul id="seo" class="records"></ul>
-      </section>
+      <a class="back-link" href="/dashboard">返回工作台</a>
     </div>
-  </main>
+  </section>
+
+  <div id="console" class="console" hidden>
+    <aside class="admin-sidebar">
+      <a href="#overview" class="brand" aria-label="曜见管理后台"><span class="brand-icon" aria-hidden="true">Y</span><span>曜见 <small>YaoSight</small><em>管理后台</em></span></a>
+      <nav id="admin-nav" aria-label="后台导航">
+        <a href="#overview"><span class="nav-mark" aria-hidden="true">▤</span>运营概览</a>
+        <p>业务管理</p>
+        <a href="#geo"><span class="nav-mark" aria-hidden="true">◎</span>GEO 检测</a>
+        <a href="#seo"><span class="nav-mark" aria-hidden="true">↗</span>SEO 审计</a>
+        <a href="#articles"><span class="nav-mark" aria-hidden="true">▧</span>文章优化</a>
+        <a href="#channels"><span class="nav-mark" aria-hidden="true">◉</span>模型渠道</a>
+        <p>系统</p>
+        <a href="#maintenance"><span class="nav-mark" aria-hidden="true">◇</span>系统维护<span id="nav-maintenance" class="nav-alert" hidden></span></a>
+      </nav>
+      <div class="sidebar-foot"><span class="service-dot" aria-hidden="true"></span><span id="sidebar-status">正在读取</span></div>
+    </aside>
+    <div class="admin-content">
+      <header class="admin-topbar">
+        <div class="breadcrumb">管理后台 <span aria-hidden="true">/</span> <strong id="crumb">运营概览</strong></div>
+        <div class="header-actions"><a href="/dashboard">打开用户工作台 ↗</a><button id="sign-out" type="button">退出</button></div>
+      </header>
+      <main class="admin-main">
+        <div class="page-head">
+          <div><h1 id="page-title">运营概览</h1><p id="page-description"></p></div>
+          <button id="refresh" type="button">刷新数据</button>
+        </div>
+        <p id="message" class="notice" role="status"></p>
+        <section id="view-overview" data-view>
+          <div class="metric-grid">
+            <a class="metric" href="#geo"><span>GEO 检测</span><strong id="geo-count">—</strong><small>最近 30 条记录</small></a>
+            <a class="metric" href="#seo"><span>SEO 审计</span><strong id="seo-count">—</strong><small>最近 30 条记录</small></a>
+            <a class="metric" href="#articles"><span>文章优化</span><strong id="article-count">—</strong><small>最近 30 份报告</small></a>
+            <a class="metric" href="#channels"><span>已配置模型</span><strong id="channel-count">—</strong><small>查看渠道与能力</small></a>
+          </div>
+          <div class="service-summary panel">
+            <div><h2>用户端服务</h2><p id="overview-service-note" class="muted"></p></div>
+            <div><span id="overview-service-state" class="tag"></span><a class="button-link" href="#maintenance">打开维护设置</a></div>
+          </div>
+          <section class="panel">
+            <h2>最近业务记录</h2>
+            <ul id="activity" class="records"></ul>
+          </section>
+        </section>
+        <section id="view-geo" data-view hidden>
+          <div class="business-grid">
+            <section class="panel policy">
+              <h2>评测策略</h2>
+              <form id="settings" class="form-stack">
+                <label for="samples">每平台采样次数</label>
+                <select id="samples" name="sampleCount"><option value="1">1 次</option><option value="3">3 次</option><option value="5">5 次</option></select>
+                <label class="toggle"><input name="webSearch" type="checkbox"> 对支持的平台请求联网</label>
+                <p class="muted">新建检测使用此策略，同题复测沿用原运行条件。</p>
+                <button type="submit" class="primary">保存策略</button>
+              </form>
+            </section>
+            <section class="panel">
+              <h2>运行记录</h2>
+              <ul id="geo" class="records"></ul>
+              <section id="diagnostic" class="detail" hidden aria-live="polite"></section>
+            </section>
+          </div>
+        </section>
+        <section id="view-seo" data-view hidden>
+          <div class="business-grid">
+            <section class="panel policy">
+              <h2>抓取策略</h2>
+              <form id="seo-settings" class="form-stack">
+                <div class="fields">
+                  <label>工作进程 <input name="workers" type="number" min="1" max="2" required></label>
+                  <label>每秒请求 <input name="rate" type="number" min="1" max="2" required></label>
+                  <label>单次页面上限 <input name="pages" type="number" min="1" max="100" required></label>
+                  <label>待抓取队列上限 <input name="queue" type="number" min="1" max="150" required></label>
+                  <label>抓取深度 <input name="depth" type="number" min="1" max="3" required></label>
+                  <label>任务超时（秒） <input name="timeout" type="number" min="1" max="180" required></label>
+                </div>
+                <p class="muted">下次审计生效。历史记录保留当时的抓取参数。</p>
+                <button type="submit" class="primary">保存策略</button>
+              </form>
+            </section>
+            <section class="panel"><h2>审计记录</h2><ul id="seo" class="records"></ul></section>
+          </div>
+        </section>
+        <section id="view-articles" data-view hidden>
+          <section class="panel"><h2>优化报告</h2><ul id="articles" class="records"></ul><section id="article-detail" class="detail" hidden aria-live="polite"></section></section>
+        </section>
+        <section id="view-channels" data-view hidden>
+          <section class="panel">
+            <h2>渠道与模型</h2>
+            <div class="table-scroll">
+              <table><thead><tr><th>平台</th><th>渠道</th><th>配置模型</th><th>状态</th><th>能力</th><th>最近成功</th></tr></thead><tbody id="channels"></tbody></table>
+            </div>
+          </section>
+        </section>
+        <section id="view-maintenance" data-view hidden>
+          <section class="panel maintenance-panel">
+            <div class="maintenance-head"><h2>维护模式</h2><span id="maintenance-state" class="tag"></span></div>
+            <p class="muted">开启后，用户端显示维护公告，暂停新的 GEO 检测、SEO 审计和文章优化。已经开始的任务继续完成。</p>
+            <form id="maintenance-form" class="form-stack">
+              <label for="announcement">用户端公告</label>
+              <textarea id="announcement" name="message" maxlength="240" rows="3" placeholder="填写用户在维护期间看到的说明"></textarea>
+              <button id="maintenance-action" type="submit">开启停服维护</button>
+            </form>
+            <p id="maintenance-updated" class="muted"></p>
+          </section>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="maintenance-dialog" aria-labelledby="confirm-title">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-copy" class="muted"></p>
+    <div class="dialog-actions">
+      <form method="dialog"><button type="submit" id="maintenance-cancel" autofocus>取消</button></form>
+      <button id="maintenance-confirm" type="button">确认</button>
+    </div>
+  </dialog>
 </body>
 </html>

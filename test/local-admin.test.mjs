@@ -10,6 +10,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { createLocalAccount } from "../local-auth.mjs";
+import { createArticleReports } from "../article-reports.mjs";
 
 test("local users get a readable report while separately authenticated admins can inspect runs", async (t) => {
   const dataDir = await mkdtemp(join(tmpdir(), "yaosight-user-admin-"));
@@ -36,18 +37,30 @@ test("local users get a readable report while separately authenticated admins ca
     writeFile(join(seoDir, "crawl.log"), "crawler input and configuration"),
     writeFile(join(checksDir, geoId + ".json"), JSON.stringify(check)),
   ]);
+  const article = await createArticleReports(join(dataDir, "article-reports")).save({
+    title: "Article report", platform: "GPT", model: "internal-model", generatedAt: createdAt, checkId: geoId, markdown: "An example report.",
+  });
   const socket = createServer().listen(0, "127.0.0.1");
   await once(socket, "listening");
   const port = socket.address().port;
   await new Promise((resolve) => socket.close(resolve));
   const origin = "http://127.0.0.1:" + port;
   const command = fileURLToPath(new URL("../server.mjs", import.meta.url));
-  const child = spawn(process.execPath, [command], {
-    env: { ...process.env, YAOSIGHT_LOCAL_PORT: String(port), YAOSIGHT_LOCAL_DATA_DIR: dataDir },
-    stdio: "ignore", windowsHide: true,
-  });
-  const closed = once(child, "exit");
-  t.after(async () => { if (child.exitCode === null) child.kill(); await closed; });
+  let child;
+  let closed;
+  function start() {
+    child = spawn(process.execPath, [command], {
+      env: { ...process.env, YAOSIGHT_LOCAL_PORT: String(port), YAOSIGHT_LOCAL_DATA_DIR: dataDir },
+      stdio: "ignore", windowsHide: true,
+    });
+    closed = once(child, "exit");
+  }
+  async function stop() {
+    if (child.exitCode === null) child.kill();
+    await closed;
+  }
+  start();
+  t.after(stop);
 
   const request = (path, { body, cookie, source = origin } = {}) => fetch(origin + path, {
     method: body === undefined ? "GET" : "POST",
@@ -91,6 +104,11 @@ test("local users get a readable report while separately authenticated admins ca
   assert.equal(run.configuration[0].model, "private-model-id");
   assert.equal(run.sampleCount, 3);
   assert.equal(run.samples[0].modelVersion, "internal-version");
+  const articlePath = "/api/admin/articles/" + article.id;
+  assert.equal((await request(articlePath, { cookie: user })).status, 401);
+  assert.equal((await (await request("/api/admin/overview", { cookie: admin })).json()).articles[0].model, "internal-model");
+  assert.equal((await (await request(articlePath, { cookie: admin })).json()).checkId, geoId);
+  assert.match(await (await request(articlePath + "/markdown", { cookie: admin })).text(), /An example report/);
   const policy = { sampleCount: 5, webSearch: false };
   assert.equal((await request("/api/admin/settings", { cookie: user, body: policy })).status, 401);
   assert.equal((await request("/api/admin/settings", { cookie: admin, body: policy, source: "https://elsewhere.example" })).status, 403);
@@ -107,4 +125,49 @@ test("local users get a readable report while separately authenticated admins ca
   const raw = await request("/api/admin/reports/" + seoId + "/log", { cookie: admin });
   assert.equal(raw.status, 200);
   assert.equal(await raw.text(), "crawler input and configuration");
+
+  const limits = { workers: 1, rate: 1, pages: 20, queue: 40, depth: 2, timeout: 60000 };
+  assert.equal((await request("/api/admin/seo-settings", { cookie: user, body: limits })).status, 401);
+  assert.equal((await request("/api/admin/seo-settings", { cookie: admin, body: { ...limits, pages: 101 } })).status, 400);
+  assert.equal((await request("/api/admin/seo-settings", { cookie: admin, body: limits })).status, 200);
+  assert.deepEqual(JSON.parse(await readFile(join(dataDir, "evaluation-settings.json"), "utf8")), { ...policy, seoLimits: limits });
+
+  const enabled = { enabled: true, message: "升级中 <script>alert(1)</script>" };
+  const route = "/api/admin/maintenance";
+  assert.equal((await request(route, { cookie: user, body: enabled })).status, 401);
+  assert.equal((await request(route, { cookie: admin, body: enabled, source: "https://elsewhere.example" })).status, 403);
+  assert.equal((await request(route, { cookie: admin, body: { enabled: true, message: "a".repeat(241) } })).status, 400);
+  assert.equal((await request(route, { cookie: admin, body: enabled })).status, 200);
+  for (const page of ["/", "/home", "/login", "/dashboard"]) {
+    const result = await request(page, { cookie: user });
+    assert.equal(result.status, 503);
+    assert.equal(result.headers.get("retry-after"), "60");
+    const content = await result.text();
+    assert.ok(content.includes("服务维护中"));
+    assert.ok(content.includes("&lt;script&gt;"));
+    assert.ok(!content.includes("<script>"));
+  }
+  for (const api of ["/api/geo-checks", "/api/crawls", "/api/article-source", "/api/article-optimization", "/api/login"]) {
+    const response = await request(api, { cookie: user, body: {} });
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { code: "maintenance", error: enabled.message });
+  }
+  assert.equal((await request("/api/status", { cookie: user })).status, 503);
+  assert.equal((await request("/admin")).status, 200);
+  assert.equal((await request("/admin-console.css")).status, 200);
+  assert.equal((await request("/api/admin/overview", { cookie: admin })).status, 200);
+  assert.equal((await request("/demo/")).status, 200);
+
+  await stop();
+  start();
+  const session = await waitForServer();
+  assert.equal(session.status, 503);
+  const nextAdmin = await cookieFor("/api/admin/login", operatorPassword);
+  const settings = await (await request("/api/admin/overview", { cookie: nextAdmin })).json();
+  assert.deepEqual(settings.seoLimits, limits);
+  assert.equal(settings.maintenance.enabled, true);
+  assert.equal((await request(route, { cookie: nextAdmin, body: { ...enabled, enabled: false } })).status, 200);
+  const resumed = await cookieFor("/api/login", memberPassword);
+  assert.equal((await request("/dashboard", { cookie: resumed })).status, 200);
+  assert.equal((await request("/api/status", { cookie: resumed })).status, 200);
 });
