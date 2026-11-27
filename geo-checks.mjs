@@ -275,6 +275,8 @@ export function createGeoChecks({ dataDir, legacyDataDir, platforms }) {
     const row = running?.id === id ? running : await read(id);
     if (!row) throw new GeoError(404, "检测记录不存在。");
     if (row.state) {
+      const baseline = row.baselineId && checkIdPattern.test(row.baselineId)
+        ? await read(row.baselineId).catch(() => null) : null;
       const available = platforms.list();
       const config = new Map(row.configuration?.map((item) => [item.id, item]));
       const samples = (row.samples || []).map((sample) => {
@@ -288,8 +290,6 @@ export function createGeoChecks({ dataDir, legacyDataDir, platforms }) {
       const retestMode = ["completed", "failed"].includes(row.state) && previousPlatforms(row, available).length
         ? (config.size ? "matched" : "legacy") : undefined;
       const canRetry = retestMode === "matched" && samples.some((sample) => sample.error);
-      const baseline = row.baselineId && checkIdPattern.test(row.baselineId)
-        ? await read(row.baselineId).catch(() => null) : null;
       const modelChanged = Boolean(baseline?.samples?.some((previous) => previous.modelVersion && samples.some((sample) =>
         sample.platformId === previous.platformId && sample.number === previous.number &&
         sample.modelVersion && sample.modelVersion !== previous.modelVersion)));
