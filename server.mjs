@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { articleBodyLimit, createArticleOptimizer } from "./article-optimization.mjs";
+import { createAiRadar } from "./ai-radar.mjs";
 import { readArticle } from "./article-reader.mjs";
 import { createArticleContext } from "./article-context.mjs";
 import { hasArticleEvidence } from "./public/article-evidence.js";
@@ -39,6 +40,7 @@ const geoChecks = createGeoChecks({
 const optimizeArticle = createArticleOptimizer(geoChecks, geoPlatforms);
 const articleContext = createArticleContext(join(dataDir, "article-context"));
 const articleReports = createArticleReports(join(dataDir, "article-reports"));
+const aiRadar = createAiRadar();
 const files = { html: "report.html", json: "report.json", log: "crawl.log" };
 const staticFiles = new Map([
   ...["/", "/home", "/login"].map((path) => [path, ["public/home.html", "text/html; charset=utf-8"]]),
@@ -47,6 +49,7 @@ const staticFiles = new Map([
   ["/home.js", ["public/home.js", "text/javascript; charset=utf-8"]],
   ["/theme.js", ["public/theme.js", "text/javascript; charset=utf-8"]],
   ["/overview.js", ["public/overview.js", "text/javascript; charset=utf-8"]],
+  ["/ai-radar.js", ["public/ai-radar.js", "text/javascript; charset=utf-8"]],
   ["/style.css", ["public/style.css", "text/css; charset=utf-8"]],
   ["/app.js", ["public/app.js", "text/javascript; charset=utf-8"]],
   ["/article-agent.js", ["public/article-agent.js", "text/javascript; charset=utf-8"]],
@@ -378,6 +381,9 @@ async function handle(req, res, binary) {
   if (path === "/api/status") {
     const platforms = geoPlatforms.list().map(({ id, label, ready, vision }) => ({ id, label, ready, vision }));
     return json(res, 200, { jobs: recentSeoJobs().map(publicSeoJob), platforms });
+  }
+  if (path === "/api/ai-radar") {
+    return json(res, 200, await aiRadar({ force: requestUrl.searchParams.get("refresh") === "1" }));
   }
   if (path === "/api/overview") {
     const cutoff = Date.now() - 32 * 24 * 60 * 60 * 1000;

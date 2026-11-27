@@ -1,10 +1,12 @@
 import { initTheme } from "./theme.js";
 import { setupOverview } from "./overview.js";
+import { setupAiRadar } from "./ai-radar.js";
 import { setupArticleAgent } from "./article-agent.js";
 import { articleAdvice } from "./article-evidence.js";
 
 initTheme();
 const overview = setupOverview(api);
+const aiRadar = setupAiRadar(api);
 const articleAgent = setupArticleAgent(api);
 const $ = (selector) => document.querySelector(selector);
 const geoForm = $("#geo-form");
@@ -29,7 +31,7 @@ const rechargeOptions = $(".recharge-options");
 const rechargeCustom = $("#recharge-custom");
 const currency = new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" });
 const pageTitles = {
-  overview: "仪表盘", article: "GEO 工具", brand: "GEO 工具", optimize: "文章优化 Agent", seo: "SEO 审计",
+  overview: "仪表盘", radar: "AI 雷达", article: "GEO 工具", brand: "GEO 工具", optimize: "文章优化 Agent", seo: "SEO 审计",
   history: "历史记录", billing: "充值/订阅", recharge: "充值/订阅",
 };
 const labels = { running: "抓取中", done: "报告已生成", error: "运行失败" };
@@ -146,6 +148,7 @@ function route() {
   const isBilling = view === "billing" || view === "recharge";
   $("#geo-view").hidden = !isGeo;
   $("#overview-view").hidden = view !== "overview";
+  $("#radar-view").hidden = view !== "radar";
   $("#seo-view").hidden = view !== "seo";
   $("#optimize-view").hidden = view !== "optimize";
   $("#history-view").hidden = view !== "history";
@@ -154,6 +157,7 @@ function route() {
   $("#recharge-panel").hidden = view !== "recharge";
   $("#breadcrumb").textContent = pageTitles[view];
   setCurrent("#overview-nav", view === "overview");
+  setCurrent("#radar-nav", view === "radar");
   setCurrent("#geo-nav", isGeo);
   setCurrent("#seo-nav", view === "seo");
   setCurrent("#optimize-nav", view === "optimize");
@@ -165,6 +169,7 @@ function route() {
   setCurrent("#brand-tab", view === "brand");
   if (isGeo) updateMode(view);
   if (view === "overview") void overview.refresh(true);
+  if (view === "radar") void aiRadar.refresh();
   if (isGeo || view === "history") void loadHistory();
   if (selectedCheckId) void showResult(selectedCheckId);
   if (selectedSeoId) void showSeoResult(selectedSeoId);
