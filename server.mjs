@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { articleBodyLimit, createArticleOptimizer } from "./article-optimization.mjs";
 import { createAiRadar } from "./ai-radar.mjs";
+import { createRadarTranslation } from "./radar-translation.mjs";
 import { readArticle } from "./article-reader.mjs";
 import { createArticleContext } from "./article-context.mjs";
 import { hasArticleEvidence } from "./public/article-evidence.js";
@@ -41,6 +42,7 @@ const optimizeArticle = createArticleOptimizer(geoChecks, geoPlatforms);
 const articleContext = createArticleContext(join(dataDir, "article-context"));
 const articleReports = createArticleReports(join(dataDir, "article-reports"));
 const aiRadar = createAiRadar();
+const translateRadar = createRadarTranslation(geoPlatforms);
 const files = { html: "report.html", json: "report.json", log: "crawl.log" };
 const staticFiles = new Map([
   ...["/", "/home", "/login"].map((path) => [path, ["public/home.html", "text/html; charset=utf-8"]]),
@@ -49,6 +51,7 @@ const staticFiles = new Map([
   ["/home.js", ["public/home.js", "text/javascript; charset=utf-8"]],
   ["/theme.js", ["public/theme.js", "text/javascript; charset=utf-8"]],
   ["/overview.js", ["public/overview.js", "text/javascript; charset=utf-8"]],
+  ["/radar-language.js", ["public/radar-language.js", "text/javascript; charset=utf-8"]],
   ["/style.css", ["public/style.css", "text/css; charset=utf-8"]],
   ["/app.js", ["public/app.js", "text/javascript; charset=utf-8"]],
   ["/article-agent.js", ["public/article-agent.js", "text/javascript; charset=utf-8"]],
@@ -270,6 +273,15 @@ async function handle(req, res, binary) {
   }
   if (path.startsWith("/api/") && !auth.signedIn(req)) {
     return json(res, 401, { error: "请先登录工作台。" });
+  }
+  if (path === "/api/ai-radar/translate") {
+    if (req.method !== "POST") return json(res, 405, { error: "不支持此请求。" });
+    if (req.headers.origin !== origin || req.headers["sec-fetch-site"] === "cross-site") {
+      return json(res, 403, { error: "来源不符。" });
+    }
+    const radar = await aiRadar();
+    if (admin.maintenance.enabled) return maintenanceResponse(res);
+    return json(res, 200, await translateRadar(radar));
   }
   if (path === "/api/article-source" || path === "/api/article-optimization") {
     if (req.method !== "POST") return json(res, 405, { error: "不支持此请求。" });

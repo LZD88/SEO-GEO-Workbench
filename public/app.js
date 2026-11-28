@@ -2,6 +2,7 @@ import { initTheme } from "./theme.js";
 import { setupOverview } from "./overview.js";
 import { setupArticleAgent } from "./article-agent.js";
 import { articleAdvice } from "./article-evidence.js";
+import { radarTextKey } from "./radar-language.js";
 
 initTheme();
 const overview = setupOverview(api);
@@ -149,6 +150,12 @@ function radarToolCard(item) {
 function setupAiRadar(client) {
   const refreshInterval = 15 * 60_000;
   const refreshButton = $("#radar-refresh");
+  const languageButton = $("#radar-language");
+  const languagePanel = $("#radar-language-panel");
+  const languageOptions = [...languagePanel.querySelectorAll("[data-radar-language]")];
+  const languageStatus = $("#radar-language-status");
+  const retry = $("#radar-language-retry");
+  const languageKey = "yaosight-radar-language";
   const status = $("#radar-status");
   const sources = $("#radar-sources");
   const news = $("#radar-news");
@@ -156,6 +163,88 @@ function setupAiRadar(client) {
   const tools = $("#radar-tools");
   let loading = false;
   let loadedAt = 0;
+  let snapshot;
+  let chinese = localStorage.getItem(languageKey) === "zh-CN";
+  let translations = {};
+  let displayedSnapshot;
+  let pending;
+
+  function showLanguageStatus(text, failed = false) {
+    languageStatus.textContent = text;
+    retry.hidden = !failed;
+  }
+
+  function renderContent() {
+    const localized = (item, includeTitle = true) => {
+      const translated = chinese && translations[radarTextKey(includeTitle ? item.title : "", item.summary)];
+      return translated ? { ...item, ...translated } : item;
+    };
+    const sections = [
+      [news, snapshot.news, radarNewsCard, "暂时没有读取到最新资讯。"],
+      [discussions, snapshot.discussions, radarDiscussionRow, "暂时没有读取到社区热议。"],
+      [tools, snapshot.tools, radarToolCard, "暂时没有读取到开源项目。"],
+    ];
+    for (const [container, items, draw, empty] of sections) {
+      container.replaceChildren(...(items.length
+        ? items.map((item) => draw(localized(item, container !== tools))) : [radarEmpty(container, empty)]));
+    }
+  }
+
+  function showLanguage() {
+    languageButton.dataset.translated = String(chinese);
+    for (const option of languageOptions) {
+      option.setAttribute("aria-pressed", String((option.dataset.radarLanguage === "zh-CN") === chinese));
+    }
+  }
+
+  async function translate() {
+    if (!chinese || !snapshot || pending || displayedSnapshot === snapshot) return;
+    if (!snapshot.news.length && !snapshot.discussions.length && !snapshot.tools.length) return;
+    const current = snapshot;
+    const request = client("/api/ai-radar/translate", {});
+    pending = request;
+    showLanguageStatus("正在翻译，原文仍可阅读…");
+    try {
+      const result = await request;
+      translations = result.translations;
+      if (!result.partial) displayedSnapshot = current;
+      if (chinese) {
+        if (snapshot === current) {
+          const some = Object.keys(translations).length > 0;
+          showLanguageStatus(result.partial
+            ? (some ? "部分内容暂未翻译，已保留原文。" : "翻译暂不可用，已保留原文。")
+            : (some ? "正在显示简体中文译文。" : ""), result.partial);
+        }
+        renderContent();
+      }
+    } catch {
+      if (chinese) showLanguageStatus("翻译暂不可用，已保留原文。", true);
+    } finally {
+      pending = undefined;
+      if (current !== snapshot) void translate();
+    }
+  }
+
+  for (const option of languageOptions) {
+    option.addEventListener("click", () => {
+      chinese = option.dataset.radarLanguage === "zh-CN";
+      localStorage.setItem(languageKey, chinese ? "zh-CN" : "original");
+      showLanguage();
+      if (snapshot) renderContent();
+      if (!chinese) showLanguageStatus("");
+      else if (displayedSnapshot === snapshot && displayedSnapshot) showLanguageStatus("正在显示简体中文译文。");
+      else if (pending) showLanguageStatus("正在翻译，原文仍可阅读…");
+      else void translate();
+      languagePanel.hidePopover();
+      languageButton.focus();
+    });
+  }
+  retry.addEventListener("click", () => {
+    languagePanel.hidePopover();
+    languageButton.focus();
+    void translate();
+  });
+  showLanguage();
 
   async function refresh(force = false) {
     if (loading || (!force && Date.now() - loadedAt < refreshInterval)) return;
@@ -166,10 +255,9 @@ function setupAiRadar(client) {
     try {
       const data = await client("/api/ai-radar" + (force ? "?refresh=1" : ""));
       loadedAt = Date.now();
-      news.replaceChildren(...(data.news.length ? data.news.map(radarNewsCard) : [radarEmpty(news, "暂时没有读取到最新资讯。")]));
-      discussions.replaceChildren(...(data.discussions.length
-        ? data.discussions.map(radarDiscussionRow) : [radarEmpty(discussions, "暂时没有读取到社区热议。")]));
-      tools.replaceChildren(...(data.tools.length ? data.tools.map(radarToolCard) : [radarEmpty(tools, "暂时没有读取到开源项目。")]));
+      snapshot = data;
+      renderContent();
+      void translate();
       sources.replaceChildren(...data.sources.map((source) => {
         const pill = element("span", source.label, "radar-source-pill");
         pill.dataset.state = source.ok ? "ready" : source.stale ? "stale" : "offline";
@@ -197,7 +285,13 @@ function setupAiRadar(client) {
   }
   setInterval(refreshWhileVisible, 60_000);
   document.addEventListener("visibilitychange", refreshWhileVisible);
-  return { refresh };
+  return {
+    refresh,
+    setVisible(visible) {
+      languageButton.hidden = !visible;
+      if (!visible && languagePanel.matches(":popover-open")) languagePanel.hidePopover();
+    },
+  };
 }
 
 function setCurrent(selector, enabled) {
@@ -256,6 +350,7 @@ function route() {
   $("#geo-view").hidden = !isGeo;
   $("#overview-view").hidden = view !== "overview";
   $("#radar-view").hidden = view !== "radar";
+  aiRadar.setVisible(view === "radar");
   $("#seo-view").hidden = view !== "seo";
   $("#optimize-view").hidden = view !== "optimize";
   $("#history-view").hidden = view !== "history";
