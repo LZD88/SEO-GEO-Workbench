@@ -103,12 +103,12 @@ function radarExternalLink(text, href, className = "") {
 function radarTime(value) {
   if (!value) return "时间未标注";
   return new Date(value).toLocaleString("zh-CN", {
-    month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+    timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
   });
 }
 
-function radarEmpty(text) {
-  return element("p", text, "radar-empty");
+function radarEmpty(container, text) {
+  return element(container.tagName === "UL" ? "li" : "p", text, "radar-empty");
 }
 
 function radarNewsCard(item) {
@@ -147,6 +147,7 @@ function radarToolCard(item) {
 }
 
 function setupAiRadar(client) {
+  const refreshInterval = 15 * 60_000;
   const refreshButton = $("#radar-refresh");
   const status = $("#radar-status");
   const sources = $("#radar-sources");
@@ -157,7 +158,7 @@ function setupAiRadar(client) {
   let loadedAt = 0;
 
   async function refresh(force = false) {
-    if (loading || (!force && loadedAt && Date.now() - loadedAt < 10 * 60_000)) return;
+    if (loading || (!force && Date.now() - loadedAt < refreshInterval)) return;
     loading = true;
     refreshButton.disabled = true;
     status.textContent = force ? "正在刷新全球 AI 动态…" : "正在汇总全球 AI 动态…";
@@ -165,19 +166,21 @@ function setupAiRadar(client) {
     try {
       const data = await client("/api/ai-radar" + (force ? "?refresh=1" : ""));
       loadedAt = Date.now();
-      news.replaceChildren(...(data.news.length ? data.news.map(radarNewsCard) : [radarEmpty("暂时没有读取到最新资讯。")]));
+      news.replaceChildren(...(data.news.length ? data.news.map(radarNewsCard) : [radarEmpty(news, "暂时没有读取到最新资讯。")]));
       discussions.replaceChildren(...(data.discussions.length
-        ? data.discussions.map(radarDiscussionRow) : [radarEmpty("暂时没有读取到社区热议。")]));
-      tools.replaceChildren(...(data.tools.length ? data.tools.map(radarToolCard) : [radarEmpty("暂时没有读取到工具榜。")]));
+        ? data.discussions.map(radarDiscussionRow) : [radarEmpty(discussions, "暂时没有读取到社区热议。")]));
+      tools.replaceChildren(...(data.tools.length ? data.tools.map(radarToolCard) : [radarEmpty(tools, "暂时没有读取到开源项目。")]));
       sources.replaceChildren(...data.sources.map((source) => {
         const pill = element("span", source.label, "radar-source-pill");
         pill.dataset.state = source.ok ? "ready" : source.stale ? "stale" : "offline";
-        pill.title = source.ok ? "已更新" : source.stale ? "当前连接失败，展示上次结果" : source.error || "暂不可用";
+        pill.title = source.ok ? "已更新" : source.stale ? "当前连接失败，展示上次结果" : "暂不可用";
+        pill.setAttribute("aria-label", source.label + " · " + pill.title);
         return pill;
       }));
       const ready = data.sources.filter((source) => source.ok).length;
-      status.textContent = radarTime(data.updatedAt) + " 更新 · " + ready + "/" + data.sources.length + " 个来源在线" +
-        (data.partial ? " · 个别来源暂不可用，其他内容仍可正常查看" : "");
+      const updated = data.updatedAt ? "最近更新 " + radarTime(data.updatedAt) + "（北京时间） · " : "";
+      status.textContent = updated + ready + "/" + data.sources.length + " 个来源可用" +
+        (data.sources.some((source) => source.stale) ? " · 部分内容来自上次更新" : "");
     } catch (error) {
       status.textContent = error.message;
       status.classList.add("error");
@@ -188,6 +191,12 @@ function setupAiRadar(client) {
   }
 
   refreshButton.addEventListener("click", () => void refresh(true));
+  $("#radar-open-tools").addEventListener("click", () => $("#radar-picks-title").focus());
+  function refreshWhileVisible() {
+    if (view === "radar" && !document.hidden) void refresh();
+  }
+  setInterval(refreshWhileVisible, 60_000);
+  document.addEventListener("visibilitychange", refreshWhileVisible);
   return { refresh };
 }
 

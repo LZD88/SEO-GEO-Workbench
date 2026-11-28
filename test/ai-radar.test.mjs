@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createAiRadar } from "../ai-radar.mjs";
 
-const rss = (title, link, date = "Thu, 27 Nov 2026 08:00:00 GMT") => `
+const rss = (title, link, date = "Fri, 27 Nov 2026 08:00:00 GMT") => `
   <rss><channel><item><title>${title}</title><link>${link}</link>
   <pubDate>${date}</pubDate><description><![CDATA[<p>Useful &amp; current.</p>]]></description></item></channel></rss>`;
 
@@ -55,5 +55,30 @@ test("AI radar retains cached content when a later refresh fails", async () => {
   assert.equal(first.news.length, 1);
   assert.equal(second.news.length, 1);
   assert.equal(second.news[0].title, "Cached story");
+  assert.equal(second.updatedAt, first.updatedAt);
   assert.ok(second.sources.every((source) => source.stale || !source.ok));
+});
+
+test("AI radar shares an in-flight refresh and keeps its previous update time on cache hits", async () => {
+  const requests = [];
+  let clock = Date.parse("2026-11-28T08:00:00Z");
+  const radar = createAiRadar({
+    now: () => clock,
+    fetcher: async (url) => {
+      requests.push(new URL(url));
+      if (url.includes("algolia.com")) return response({ hits: [] });
+      if (url.includes("api.github.com")) return response({ items: [] });
+      return response(rss("Latest story", "https://example.com/news"));
+    },
+  });
+  const first = radar();
+  const second = radar({ force: true });
+  const [initial, overlapping] = await Promise.all([first, second]);
+  assert.deepEqual(initial, overlapping);
+  assert.equal(requests.length, initial.sources.length);
+  assert.ok(requests.find((url) => url.hostname === "hn.algolia.com").searchParams.get("numericFilters").includes("created_at_i>="));
+  assert.ok(requests.find((url) => url.hostname === "api.github.com").searchParams.get("q").includes("pushed:>=2026-11-21"));
+  clock += 20_000;
+  assert.equal((await radar({ force: true })).updatedAt, initial.updatedAt);
+  assert.equal(requests.length, initial.sources.length);
 });

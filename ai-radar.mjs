@@ -1,4 +1,5 @@
 const maxFeedBytes = 2 * 1024 * 1024;
+const week = 7 * 24 * 60 * 60_000;
 
 const feeds = [
   { id: "openai", label: "OpenAI News", url: "https://openai.com/news/rss.xml" },
@@ -10,13 +11,13 @@ const feeds = [
 const communitySource = {
   id: "hacker-news",
   label: "Hacker News",
-  url: "https://hn.algolia.com/api/v1/search_by_date?query=AI&tags=story&numericFilters=points%3E%3D20&hitsPerPage=50",
+  url: "https://hn.algolia.com/api/v1/search_by_date?query=AI&tags=story&hitsPerPage=80",
 };
 
 const toolSource = {
   id: "github",
   label: "GitHub AI 工具",
-  url: "https://api.github.com/search/repositories?q=topic%3Aai-tools%20stars%3A%3E50&sort=updated&order=desc&per_page=30",
+  url: "https://api.github.com/search/repositories?sort=stars&order=desc&per_page=30",
 };
 
 function decodeEntities(value = "") {
@@ -73,12 +74,19 @@ function parseFeed(xml, source) {
 }
 
 async function responseText(response) {
-  if (!response.ok) throw new Error("HTTP " + response.status);
-  const size = Number(response.headers.get("content-length"));
-  if (Number.isFinite(size) && size > maxFeedBytes) throw new Error("响应过大");
-  const text = await response.text();
-  if (Buffer.byteLength(text) > maxFeedBytes) throw new Error("响应过大");
-  return text;
+  if (!response.ok || Number(response.headers.get("content-length")) > maxFeedBytes) {
+    await response.body?.cancel();
+    throw new Error(response.ok ? "响应过大" : "HTTP " + response.status);
+  }
+  if (!response.body) return "";
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of response.body) {
+    size += chunk.byteLength;
+    if (size > maxFeedBytes) throw new Error("响应过大");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks, size).toString("utf8");
 }
 
 function requestOptions() {
@@ -95,8 +103,10 @@ async function readFeed(fetcher, source) {
   return items;
 }
 
-async function readCommunity(fetcher) {
-  const response = await fetcher(communitySource.url, requestOptions());
+async function readCommunity(fetcher, source, time) {
+  const url = new URL(source.url);
+  url.searchParams.set("numericFilters", "points>=20,created_at_i>=" + Math.floor((time - week) / 1000));
+  const response = await fetcher(url.href, requestOptions());
   const payload = JSON.parse(await responseText(response));
   const aiTopic = /\b(ai|llm|gpt|agent|agents|openai|anthropic|gemini|deepmind|machine learning|artificial intelligence)\b/i;
   return (Array.isArray(payload.hits) ? payload.hits : [])
@@ -116,8 +126,11 @@ async function readCommunity(fetcher) {
     .slice(0, 8);
 }
 
-async function readTools(fetcher) {
-  const response = await fetcher(toolSource.url, requestOptions());
+async function readTools(fetcher, source, time) {
+  const url = new URL(source.url);
+  const since = new Date(time - week).toISOString().slice(0, 10);
+  url.searchParams.set("q", "topic:ai-tools stars:>50 archived:false pushed:>=" + since);
+  const response = await fetcher(url.href, requestOptions());
   const payload = JSON.parse(await responseText(response));
   const unwanted = /\b(vpn|proxy|keygen|crack|cheat|casino|betting)\b|翻墙|机场|破解/i;
   return (Array.isArray(payload.items) ? payload.items : []).flatMap((item) => {
@@ -151,6 +164,7 @@ function sourceResult(source, kind, cached, error) {
 
 export function createAiRadar({ fetcher = fetch, now = Date.now, ttl = 15 * 60_000, refreshFloor = 60_000 } = {}) {
   const cache = new Map();
+  let pending;
 
   async function load(source, kind, reader, force) {
     const previous = cache.get(source.id);
@@ -158,41 +172,46 @@ export function createAiRadar({ fetcher = fetch, now = Date.now, ttl = 15 * 60_0
     const recent = previous && time - previous.lastAttempt < (force ? refreshFloor : ttl);
     if (recent) return { items: previous.items, source: sourceResult(source, kind, previous, previous.error) };
     try {
-      const items = await reader(fetcher, source);
-      const next = { items, fetchedAt: time, lastAttempt: time };
+      const items = await reader(fetcher, source, time);
+      const next = { items, fetchedAt: now(), lastAttempt: now() };
       cache.set(source.id, next);
       return { items, source: sourceResult(source, kind, next) };
     } catch (error) {
-      const next = { items: previous?.items || [], fetchedAt: previous?.fetchedAt, lastAttempt: time, error };
+      const next = { items: previous?.items || [], fetchedAt: previous?.fetchedAt, lastAttempt: now(), error };
       cache.set(source.id, next);
       return { items: next.items, source: sourceResult(source, kind, next, error) };
     }
   }
 
-  return async function radar({ force = false } = {}) {
+  async function collect(force) {
     const tasks = [
-      ...feeds.map((source) => load(source, "news", (client) => readFeed(client, source), force)),
+      ...feeds.map((source) => load(source, "news", readFeed, force)),
       load(communitySource, "community", readCommunity, force),
       load(toolSource, "tools", readTools, force),
     ];
     const results = await Promise.all(tasks);
     const byFeed = results.slice(0, feeds.length).map((result) => result.items);
-    const allNews = byFeed.flat()
-      .filter((item, index, items) => items.findIndex((other) => other.url === item.url || other.title === item.title) === index)
-      .sort((a, b) => Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0));
-    const balanced = byFeed.flatMap((items) => items.slice(0, 2));
+    const latestFirst = (a, b) => (b.publishedAt ?? "").localeCompare(a.publishedAt ?? "");
+    const sortedFeeds = byFeed.map((items) => items.toSorted(latestFirst));
+    const allNews = sortedFeeds.flat().sort(latestFirst);
+    const balanced = sortedFeeds.flatMap((items) => items.slice(0, 2));
     const news = [...balanced, ...allNews]
       .filter((item, index, items) => items.findIndex((other) => other.url === item.url || other.title === item.title) === index)
-      .slice(0, 12)
-      .sort((a, b) => Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0));
+      .slice(0, 9)
+      .sort(latestFirst);
     const sources = results.map((result) => result.source);
     return {
-      updatedAt: new Date(now()).toISOString(),
+      updatedAt: sources.map((source) => source.updatedAt).filter(Boolean).sort().at(-1) ?? null,
       news,
       discussions: results[feeds.length].items,
       tools: results[feeds.length + 1].items,
       sources,
       partial: sources.some((source) => !source.ok),
     };
+  }
+
+  return function radar({ force = false } = {}) {
+    pending ??= collect(force).finally(() => { pending = undefined; });
+    return pending;
   };
 }
